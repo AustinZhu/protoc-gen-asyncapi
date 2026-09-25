@@ -1,7 +1,10 @@
 # Workspace: the temporal/v1 options module and the example that uses it.
+# Only the named `proto` module is published to the BSR (see release.yaml);
+# the example module is intentionally unnamed.
 version: v2
 modules:
   - path: proto
+    name: buf.build/austin-zhu/protoc-gen-temporal-asyncapi
   - path: example/proto
 lint:
   use:

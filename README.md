@@ -30,7 +30,20 @@ named `protoc-gen-temporal-asyncapi_<version>_<os>_<arch>.tar.gz`.
 
 ### 2. Add the options file
 
-Copy [`proto/temporal/v1/options.proto`](proto/temporal/v1/options.proto) into your proto tree at
+The options are published to the Buf Schema Registry as
+**[`buf.build/austin-zhu/protoc-gen-temporal-asyncapi`](https://buf.build/austin-zhu/protoc-gen-temporal-asyncapi)**.
+Each release is labeled with its tag. Add it as a dependency in your `buf.yaml`:
+
+```yaml
+version: v2
+deps:
+  - buf.build/austin-zhu/protoc-gen-temporal-asyncapi        # latest
+  # - buf.build/austin-zhu/protoc-gen-temporal-asyncapi:v0.2.0  # or pin a release label
+```
+
+Then run `buf dep update` and `import "temporal/v1/options.proto";`.
+
+Without buf, copy [`proto/temporal/v1/options.proto`](proto/temporal/v1/options.proto) into your proto tree at
 `temporal/v1/options.proto`. Each release archive also includes it. If you also want to use it from Go, the generated
 bindings are at `github.com/AustinZhu/protoc-gen-temporal-asyncapi/gen/temporalv1`.
 
@@ -247,4 +260,27 @@ Golden cases live in `testdata/<case>/`. Each case holds:
 - an optional `params` file;
 - either `expected.asyncapi.{yaml,json}` or `expected.error`.
 
-Releases are cut by pushing a `v*` tag, or by running the **release** workflow manually with a version (it creates the tag). CI runs the test suite, then GoReleaser publishes the binaries.
+### Releasing
+
+Cut a release in either of two ways:
+
+- push a `v*` tag;
+- run the **release** workflow manually from the default branch with a version. The workflow creates the tag.
+
+The workflow then runs these steps in order. If any step fails, the later ones don't run:
+
+1. Tests and spec validation, the same checks as CI.
+2. BSR checks: `buf lint` on the `proto` module, `buf breaking` against the previous release tag, and a check that
+   `buf.yaml` names the module and that the `BUF_TOKEN` secret is set.
+3. GoReleaser publishes the GitHub release and binaries. For a manual run, the tag is created just before this.
+4. Only the `proto` module (`temporal/v1/options.proto`) is pushed to `buf.build/austin-zhu/protoc-gen-temporal-asyncapi`,
+   labeled with the tag. The example module is never published, and nothing is published from pull requests, forks or
+   branch pushes.
+
+Before the first BSR release, the owner must do two things:
+
+1. Create the `buf.build/austin-zhu/protoc-gen-temporal-asyncapi` module on the BSR. The workflow deliberately doesn't
+   pass `--create`, so the token never needs permission to create modules.
+2. Add a `BUF_TOKEN` Actions secret containing a token for a bot user that has write access to that module only.
+
+The token is passed to `buf push` through the environment and is never logged or written to disk.
