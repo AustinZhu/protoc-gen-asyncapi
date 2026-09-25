@@ -1,0 +1,79 @@
+// Chat rooms on Redis Pub/Sub.
+syntax = "proto3";
+
+package chat.v1;
+
+import "google/protobuf/empty.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+// Room messaging.
+service Rooms {
+  option (redis.asyncapi.v1.service) = {key_prefix: "chat"};
+
+  // Posts a message to a room.
+  rpc Post(ChatMessage) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      pattern: PATTERN_PUBLISH
+      channel: "rooms:{room}"
+    };
+  }
+
+  // Receives messages of every room.
+  rpc Listen(ChatMessage) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {channel: "rooms:{room}"};
+  }
+
+  // Receives moderation events of any kind.
+  rpc Moderate(ModerationEvent) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {channel: "moderation:*"};
+  }
+
+  // Broadcasts presence on the room's shard.
+  rpc Presence(google.protobuf.Empty) returns (stream PresenceUpdate) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "presence:{room}"
+      pubsub: {sharded: true}
+    };
+  }
+
+  // Looks up a user's profile.
+  rpc GetProfile(GetProfileRequest) returns (Profile) {
+    option (redis.asyncapi.v1.operation) = {reply_messages: ["chat.v1.ChatError"]};
+  }
+}
+
+// A message posted to a room.
+message ChatMessage {
+  // Room the message was posted to.
+  string room = 1;
+  string author = 2;
+  string text = 3;
+}
+
+// A moderation event.
+message ModerationEvent {
+  string room = 1;
+  string action = 2;
+}
+
+// A presence change.
+message PresenceUpdate {
+  string room = 1;
+  string user = 2;
+  bool online = 3;
+}
+
+message GetProfileRequest {
+  string user = 1;
+}
+
+message Profile {
+  string user = 1;
+  string display_name = 2;
+}
+
+// Error reply.
+message ChatError {
+  string code = 1;
+  string message = 2;
+}

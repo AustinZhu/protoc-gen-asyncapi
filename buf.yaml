@@ -1,4 +1,4 @@
-# Workspace: the three published annotation modules and the (unpublished)
+# Workspace: the published annotation modules and the (unpublished)
 # examples. See .github/workflows/release.yaml for publishing.
 version: v2
 modules:
@@ -6,9 +6,12 @@ modules:
     name: buf.build/austin-zhu/asyncapi
   - path: proto/nats
     name: buf.build/austin-zhu/nats-asyncapi
+  - path: proto/redis
+    name: buf.build/austin-zhu/redis-asyncapi
   - path: proto/temporal
     name: buf.build/austin-zhu/temporal-asyncapi
   - path: examples/nats/proto
+  - path: examples/redis/proto
   - path: examples/temporal/proto
 lint:
   use:
@@ -18,15 +21,19 @@ lint:
     # and many operations take or return google.protobuf.Empty.
     RPC_REQUEST_RESPONSE_UNIQUE:
       - examples/nats/proto/acme
+      - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_REQUEST_STANDARD_NAME:
       - examples/nats/proto/acme
+      - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_RESPONSE_STANDARD_NAME:
       - examples/nats/proto/acme
+      - examples/redis/proto/acme
       - examples/temporal/proto/acme
     SERVICE_SUFFIX:
       - examples/nats/proto/acme
+      - examples/redis/proto/acme
       - examples/temporal/proto/acme
 breaking:
   use:

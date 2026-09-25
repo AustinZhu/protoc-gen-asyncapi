@@ -1,0 +1,126 @@
+// Background jobs on Redis Streams and Lists.
+syntax = "proto3";
+
+package jobs.v1;
+
+import "google/protobuf/empty.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+// Order events on a stream consumed by a consumer group.
+service OrderEvents {
+  option (redis.asyncapi.v1.service) = {
+    key_prefix: "shop"
+    transport: TRANSPORT_STREAM
+    consumer_group: "fulfilment"
+  };
+
+  // Records an order event.
+  rpc Record(google.protobuf.Empty) returns (stream OrderEvent) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "orders:events"
+      stream: {
+        trim: {max_len: 100000}
+        no_mkstream: true
+      }
+    };
+  }
+
+  // Fulfils orders.
+  rpc Fulfil(OrderEvent) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "orders:events"
+      stream: {
+        consumer: "worker-{hostname}"
+        start_id: "0"
+        count: 10
+        block: "5s"
+        claim_min_idle: "1m"
+        max_deliveries: 5
+        dead_letter: "orders:events:dead"
+      }
+    };
+  }
+}
+
+// Work queues on lists.
+service Mailer {
+  option (redis.asyncapi.v1.service) = {
+    key_prefix: "mail"
+    transport: TRANSPORT_LIST
+  };
+
+  // Sends an email (FIFO queue).
+  rpc Send(Email) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {channel: "outbox"};
+  }
+
+  // Sends a priority email through a reliable queue.
+  rpc SendUrgent(Email) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "urgent"
+      list: {
+        push: END_RIGHT
+        block: "0"
+        processing_list: "urgent:processing"
+        max_len: 1000
+      }
+    };
+  }
+
+  // Renders a template; the reply is pushed to a per-request list.
+  rpc Render(RenderRequest) returns (RenderResult) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "render"
+      reply_channel: "render:replies:{request_id}"
+    };
+  }
+}
+
+// Audit trail on a stream read without a consumer group.
+service Audit {
+  option (redis.asyncapi.v1.service) = {key_prefix: "shop"};
+
+  // Tails the audit stream.
+  rpc Tail(AuditEntry) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "audit"
+      stream: {
+        flatten: true
+        count: 100
+        trim: {
+          min_id: "1700000000000-0"
+          limit: 100
+        }
+      }
+    };
+  }
+}
+
+// An order lifecycle event.
+message OrderEvent {
+  string order_id = 1;
+  string status = 2;
+}
+
+// An audit log entry.
+message AuditEntry {
+  string actor = 1;
+  string action = 2;
+  int64 at = 3;
+}
+
+// An email.
+message Email {
+  string to = 1;
+  string subject = 2;
+  string body = 3;
+}
+
+message RenderRequest {
+  string request_id = 1;
+  string template = 2;
+}
+
+message RenderResult {
+  string html = 1;
+}

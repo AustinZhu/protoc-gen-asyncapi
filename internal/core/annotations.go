@@ -12,6 +12,12 @@ import (
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
 	asyncapiv3 "github.com/AustinZhu/protoc-gen-asyncapi/pb/asyncapi/v3"
+
+	// Every protocol's annotations are registered so that ForeignAnnotations
+	// recognizes them whichever plugin binary runs.
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1"
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1"
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/temporal/asyncapi/v1"
 )
 
 // Extension returns the value of extension xt set on opts, or the zero
@@ -192,4 +198,34 @@ func NormalizeName(s string) string { return normalizeName(s) }
 // JSONPointerEscape escapes a JSON pointer token.
 func JSONPointerEscape(s string) string {
 	return strings.NewReplacer("~", "~0", "/", "~1").Replace(s)
+}
+
+// ForeignAnnotations reports whether a service or one of its rpcs carries
+// the annotations of a protocol other than own (e.g. "nats.asyncapi.v1"),
+// so protocols inferring services leave it to that protocol.
+func ForeignAnnotations(s *protogen.Service, own protoreflect.FullName) bool {
+	foreign := func(opts proto.Message) bool {
+		found := false
+		if opts == nil || !opts.ProtoReflect().IsValid() {
+			return false
+		}
+		opts.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+			pkg := fd.ParentFile().Package()
+			if fd.IsExtension() && pkg != own && strings.HasSuffix(string(pkg), ".asyncapi.v1") {
+				found = true
+				return false
+			}
+			return true
+		})
+		return found
+	}
+	if foreign(s.Desc.Options()) {
+		return true
+	}
+	for _, m := range s.Methods {
+		if foreign(m.Desc.Options()) {
+			return true
+		}
+	}
+	return false
 }

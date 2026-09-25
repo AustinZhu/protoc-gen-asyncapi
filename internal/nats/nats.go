@@ -74,11 +74,11 @@ func messageOptions(m *protogen.Message) *natsv1.Message {
 	return core.Extension[*natsv1.Message](m.Desc.Options(), natsv1.E_Message)
 }
 
-// Claims documents services with NATS annotations, services of files with
-// NATS or AsyncAPI document options, and every service with include_all.
+// Claims documents services with NATS annotations and, unless they carry
+// another protocol's annotations, services of files with NATS or AsyncAPI
+// document options, and every service with include_all.
 func (p *Protocol) Claims(b *core.Builder, s *protogen.Service) bool {
-	f := b.Plugin.FilesByPath[s.Desc.ParentFile().Path()]
-	if p.includeAll || serviceOptions(s) != nil || documentOptions(f) != nil || core.DocumentOptions(f) != nil {
+	if serviceOptions(s) != nil {
 		return true
 	}
 	for _, m := range s.Methods {
@@ -86,7 +86,11 @@ func (p *Protocol) Claims(b *core.Builder, s *protogen.Service) bool {
 			return true
 		}
 	}
-	return false
+	if core.ForeignAnnotations(s, "nats.asyncapi.v1") {
+		return false
+	}
+	f := b.Plugin.FilesByPath[s.Desc.ParentFile().Path()]
+	return p.includeAll || documentOptions(f) != nil || core.DocumentOptions(f) != nil
 }
 
 // HasContent reports messages with their own subject, or NATS document

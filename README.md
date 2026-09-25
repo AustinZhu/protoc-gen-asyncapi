@@ -11,13 +11,14 @@ The repository is one shared core plus one package per protocol:
 | --- | --- | --- |
 | **Core** | `asyncapi/v3/annotations.proto` (`buf.build/austin-zhu/asyncapi`) | The whole AsyncAPI 3.0/3.1 object model: info, servers, security schemes and OAuth flows, channels, parameters, operations, replies, messages, headers, examples, tags, external docs, bindings and `x-` extensions. JSON Schemas for every payload, from the proto definitions, comments, [protovalidate](https://github.com/bufbuild/protovalidate) rules and `google.api.field_behavior`. |
 | **NATS** | `nats/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/nats-asyncapi`) | Core NATS publish/subscribe, request/reply, queue groups, [NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services, JetStream streams and consumers, KV buckets and object stores. |
+| **Redis** | `redis/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/redis-asyncapi`) | Pub/Sub (plain, pattern and sharded), Streams with consumer groups, trimming, claiming and dead letters, Lists as FIFO, LIFO and reliable queues, keyspace and keyevent notifications, request/reply, and server details (topology, database, TLS, RESP, authentication). |
 | **Temporal** | `temporal/asyncapi/v1/options.proto` (`buf.build/austin-zhu/temporal-asyncapi`) | [Temporal](https://temporal.io) Workflows, Activities, Signals, Queries and Updates, with task queues, timeouts, retry policies and continue-as-new. |
 
-Three binaries are built from it:
+Four binaries are built from it:
 
-- **`protoc-gen-asyncapi`** documents every protocol. One document may mix NATS and Temporal services.
-- **`protoc-gen-nats-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document only their own protocol and ignore
-  the other's annotations.
+- **`protoc-gen-asyncapi`** documents every protocol. One document may mix NATS, Redis and Temporal services.
+- **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document
+  only their own protocol and ignore services annotated for another.
 
 The plugin generates documentation only. It generates no code and never contacts a server.
 
@@ -30,6 +31,7 @@ go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-asyncapi@late
 # or only one protocol:
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-temporal-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-nats-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-redis-asyncapi@latest
 ```
 
 Prebuilt binaries are attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-asyncapi/releases),
@@ -46,6 +48,7 @@ deps:
   - buf.build/austin-zhu/asyncapi            # asyncapi.v3: document, service, operation, message and field options
   - buf.build/austin-zhu/temporal-asyncapi   # temporal.asyncapi.v1
   - buf.build/austin-zhu/nats-asyncapi       # nats.asyncapi.v1
+  - buf.build/austin-zhu/redis-asyncapi      # redis.asyncapi.v1
   # pin a release with :v0.3.0
 ```
 
@@ -102,8 +105,28 @@ service OrderService {
 }
 ```
 
-[`examples/`](examples) has a complete setup for both protocols and the documents it generates:
-[NATS](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml) and
+A Redis service:
+
+```proto
+import "google/protobuf/empty.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+service Delivery {
+  option (redis.asyncapi.v1.service) = {key_prefix: "notify", transport: TRANSPORT_STREAM, consumer_group: "delivery"};
+
+  // Delivers a notification.
+  rpc Deliver(Notification) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "requests"
+      stream: {max_deliveries: 5, dead_letter: "requests:dead", trim: {max_len: 1000000}}
+    };
+  }
+}
+```
+
+[`examples/`](examples) has a complete setup for every protocol and the documents it generates:
+[NATS](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml),
+[Redis](examples/asyncapi/acme/notify/v1/notify.asyncapi.yaml) and
 [Temporal](examples/asyncapi/acme/shop/v1/orders.asyncapi.yaml).
 
 ### 4. Generate
@@ -216,6 +239,34 @@ request/reply, queue groups, NATS micro services (with their `$SRV` endpoints), 
 publishing, KV buckets, object stores, and NATS server details (account, JetStream domain and API prefix, TLS,
 authentication). The annotation file documents every field.
 
+## Redis
+
+AsyncAPI reserves its `redis` bindings for future use, so Redis details go in `x-redis` bindings on servers,
+channels and operations. The channel binding gives the channel's `type`; the operation binding gives the Redis
+command the documented application runs, with its arguments.
+
+| `(redis.asyncapi.v1.operation)` | Channel | Producer | Consumer |
+| --- | --- | --- | --- |
+| `pubsub: {}` (default) | Pub/Sub channel | `PUBLISH` | `SUBSCRIBE`, or `PSUBSCRIBE` for `{parameters}` and globs |
+| `pubsub: {sharded: true}` | sharded channel | `SPUBLISH` | `SSUBSCRIBE` |
+| `stream: {...}` | stream key | `XADD` with `MAXLEN`/`MINID` trimming, `NOMKSTREAM` | `XREADGROUP` with a consumer group (`COUNT`, `BLOCK`, `NOACK`, `XAUTOCLAIM`, dead letters), else `XREAD` |
+| `list: {...}` | list key | `LPUSH`/`RPUSH`, optionally capped with `LTRIM` | `BRPOP`/`BLPOP`, or `BLMOVE` into a processing list |
+
+- **Names.** `channel` is a channel name or key relative to the service's `key_prefix`, joined with `:`. It defaults
+  to `<package>:<service>:<rpc>` in snake_case. `{name}` placeholders are channel parameters bound to payload fields.
+- **Patterns.** As for NATS, request/reply, publish or subscribe is inferred from the rpc shape. Replies go to
+  `reply_channel` with the request's transport, or to a channel the requester chooses; `reply_messages` adds error
+  replies.
+- **Streams.** Entries hold the encoded payload in one field (`payload` by default, or `field`), or one field per
+  top-level payload field with `flatten`. Consumer groups and their start IDs appear on the channel binding.
+- **Keyspace notifications.** `(redis.asyncapi.v1.service).keyspace` documents `__keyspace@<db>__:<key>` (event
+  names) and `__keyevent@<db>__:<event>` (key names) subscriptions. They describe the service itself, so
+  `perspective=client` omits them.
+- **Standalone messages.** `(redis.asyncapi.v1.message)` gives a message its own channel without an rpc.
+- **Servers and auth.** `(redis.asyncapi.v1.document)` adds the topology (standalone, cluster, sentinel), database,
+  TLS, RESP version and `notify-keyspace-events` to servers, and the Redis authentication mechanism (password, ACL,
+  TLS client certificates) to security schemes.
+
 ## How Protobuf maps onto JSON Schema
 
 Schemas describe the canonical **Protobuf JSON** encoding.
@@ -242,7 +293,7 @@ skipped rather than approximated.
 
 A protocol implements `core.Protocol` (`internal/core/builder.go`): it claims the services it understands and adds
 channels, messages and operations through `core.Builder`. The core handles everything else: documents, servers,
-security, tags, schemas, bindings, validation and output. See `internal/temporal` and `internal/nats`, then register
+security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis` and `internal/nats`, then register
 the protocol in `internal/cli/plugins.go` and give it an annotations module under `proto/`.
 
 ## Development
@@ -265,13 +316,13 @@ Push a `v*` tag, or run the **release** workflow manually with a version. The wo
 failure:
 
 1. Tests and spec validation, as in CI.
-2. For each of `proto/asyncapi`, `proto/nats` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
+2. For each of `proto/asyncapi`, `proto/nats`, `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
-3. GoReleaser publishes the GitHub release and the three binaries.
-4. The three annotation modules are pushed to the BSR, labeled with the tag. The example modules are never published,
+3. GoReleaser publishes the GitHub release and the four binaries.
+4. The four annotation modules are pushed to the BSR, labeled with the tag. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the
-`BUF_TOKEN` bot user write access to those three modules only. The token is passed to `buf push` through the
+`BUF_TOKEN` bot user write access to those four modules only. The token is passed to `buf push` through the
 environment and is never logged or written to disk.

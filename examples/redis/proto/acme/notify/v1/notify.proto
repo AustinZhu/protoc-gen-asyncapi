@@ -1,0 +1,169 @@
+// Notifications for the ACME shop, delivered through Redis.
+//
+// Clients subscribe to live updates over Pub/Sub; notification requests are
+// queued on a stream consumed by the delivery workers; SMS messages go
+// through a reliable list queue; carts are cleaned up when they expire.
+syntax = "proto3";
+
+package acme.notify.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Notifications"
+    version: "1.0.0"
+    contact: {
+      name: "Platform team"
+      email: "platform@acme.example"
+    }
+  }
+  id: "urn:acme:notify"
+  servers: [
+    {
+      name: "production"
+      host: "redis.acme.example:6380"
+      description: "Redis Cluster."
+      security: ["acl"]
+    },
+    {
+      name: "local"
+      host: "localhost:6379"
+      description: "`redis-server` on your machine."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "acl"
+      description: "ACL user of the notification service."
+    }
+  ]
+};
+option (redis.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      mode: MODE_CLUSTER
+      tls: true
+      resp: 3
+      notify_keyspace_events: "Ex"
+    }
+  ]
+  auth: [
+    {
+      scheme: "acl"
+      type: AUTH_TYPE_ACL
+    }
+  ]
+};
+
+// Live updates pushed to connected clients.
+service LiveUpdates {
+  option (redis.asyncapi.v1.service) = {key_prefix: "notify:live"};
+
+  // Publishes an update to a user's channel.
+  rpc Push(google.protobuf.Empty) returns (stream LiveUpdate) {
+    option (redis.asyncapi.v1.operation) = {channel: "users:{user_id}"};
+  }
+}
+
+// Notification requests, delivered by a pool of workers.
+service Delivery {
+  option (redis.asyncapi.v1.service) = {
+    key_prefix: "notify"
+    transport: TRANSPORT_STREAM
+    consumer_group: "delivery"
+    keyspace: [
+      {
+        name: "cartExpired"
+        kind: KEYSPACE_KIND_KEYEVENT
+        key: "cart:*"
+        events: ["expired"]
+        description: "Sends an abandoned-cart reminder when a cart expires."
+      }
+    ]
+  };
+
+  // Delivers a notification through its channel.
+  rpc Deliver(Notification) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "requests"
+      stream: {
+        consumer: "{hostname}"
+        count: 50
+        block: "5s"
+        claim_min_idle: "5m"
+        max_deliveries: 5
+        dead_letter: "requests:dead"
+        trim: {max_len: 1000000}
+      }
+    };
+  }
+
+  // Renders a preview of a notification.
+  rpc Preview(Notification) returns (Rendered) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "previews"
+      pubsub: {}
+    };
+  }
+}
+
+// SMS sending through a reliable queue.
+service Sms {
+  // Sends a text message.
+  rpc Send(TextMessage) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "notify:sms"
+      list: {
+        processing_list: "notify:sms:processing"
+        block: "0"
+      }
+    };
+  }
+}
+
+// A live update shown in the user's browser.
+message LiveUpdate {
+  // Recipient.
+  string user_id = 1;
+  // Update kind, e.g. "order.shipped".
+  string kind = 2;
+  string title = 3;
+  google.protobuf.Timestamp at = 4;
+}
+
+// A notification to deliver.
+message Notification {
+  // Unique id, used for deduplication.
+  string id = 1;
+  string user_id = 2;
+  Medium medium = 3;
+  string template = 4;
+  map<string, string> variables = 5;
+}
+
+// Delivery medium.
+enum Medium {
+  MEDIUM_UNSPECIFIED = 0;
+  // Email.
+  MEDIUM_EMAIL = 1;
+  // Mobile push notification.
+  MEDIUM_PUSH = 2;
+}
+
+// A rendered notification.
+message Rendered {
+  string subject = 1;
+  string body = 2;
+}
+
+// A text message.
+message TextMessage {
+  // E.164 phone number.
+  string to = 1;
+  string body = 2;
+}

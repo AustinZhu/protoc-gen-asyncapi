@@ -3,6 +3,7 @@ version: v2
 inputs:
   - directory: proto/asyncapi
   - directory: proto/nats
+  - directory: proto/redis
   - directory: proto/temporal
 plugins:
   - local: protoc-gen-go

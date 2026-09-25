@@ -1,0 +1,322 @@
+// Redis annotations for protoc-gen-asyncapi (protoc-gen-redis-asyncapi).
+//
+// These annotations carry only Redis concepts: Pub/Sub channels (plain,
+// pattern and sharded), Streams with consumer groups and trimming, Lists
+// used as queues, keyspace notifications, and Redis specifics of servers and
+// authentication. Everything generic (info, servers, security schemes, tags,
+// summaries, examples, headers, ...) uses the asyncapi.v3 annotations
+// (asyncapi/v3/annotations.proto).
+//
+// A service only needs enough annotations to say "this is a Redis API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - request/reply vs. publish vs. subscribe is inferred from the rpc shape,
+//     as documented on Pattern;
+//   - channel names and keys default to
+//     "<package>:<service>:<method>", with ':' separators in snake_case;
+//   - `{name}` placeholders in channel names and keys are AsyncAPI channel
+//     parameters, bound to payload fields with the same name. Subscribers of
+//     parameterized Pub/Sub channels use pattern subscriptions (PSUBSCRIBE).
+//     In Redis Cluster, a placeholder that is the key's hash tag is written
+//     the same way, e.g. "orders:{customer_id}:events".
+//
+// Durations are strings in Go syntax, e.g. "500ms", "5s", "1h30m".
+syntax = "proto3";
+
+package redis.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1;redisv1";
+
+extend google.protobuf.FileOptions {
+  // Redis specifics of the document: server and authentication details.
+  Document document = 58330;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Redis defaults applied to every rpc of the service, and the keyspace
+  // notifications it consumes.
+  Service service = 58330;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the Redis operation implemented by an rpc.
+  Operation operation = 58330;
+}
+
+extend google.protobuf.MessageOptions {
+  // Gives a message its own channel (Pub/Sub channel, stream or list).
+  Message message = 58330;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the Redis specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // Redis details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 1;
+  // Redis authentication mechanism of security schemes declared in
+  // (asyncapi.v3.document).security_schemes.
+  repeated Auth auth = 2;
+}
+
+// Server adds Redis details to a server declared with the asyncapi.v3
+// annotations. They are rendered as the server's x-redis binding.
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // Logical database index (SELECT). Standalone and Sentinel deployments
+  // only: Redis Cluster has a single database.
+  int32 database = 2;
+  // Deployment topology.
+  Mode mode = 3;
+  // Master name to resolve through Sentinel (mode SENTINEL).
+  string sentinel_master = 4;
+  // Connections use TLS (rediss://).
+  bool tls = 5;
+  // RESP protocol version negotiated with HELLO: 2 or 3.
+  int32 resp = 6;
+  // The notify-keyspace-events configuration the documented keyspace
+  // notifications rely on, e.g. "Ex" or "KEA".
+  string notify_keyspace_events = 7;
+}
+
+// Mode is the topology of a Redis deployment.
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  // A single primary (with optional replicas).
+  MODE_STANDALONE = 1;
+  // Redis Cluster: keys are sharded by hash slot.
+  MODE_CLUSTER = 2;
+  // Primary discovered through Redis Sentinel.
+  MODE_SENTINEL = 3;
+}
+
+// Auth sets the Redis authentication mechanism of a security scheme. The
+// scheme type is derived from it unless the scheme sets one.
+message Auth {
+  // Name of the (asyncapi.v3.document) security scheme.
+  string scheme = 1;
+  // Authentication mechanism.
+  AuthType type = 2;
+}
+
+// AuthType lists the authentication mechanisms supported by Redis.
+enum AuthType {
+  AUTH_TYPE_UNSPECIFIED = 0;
+  // AUTH <password> against requirepass (the default user).
+  AUTH_TYPE_PASSWORD = 1;
+  // AUTH <username> <password> against an ACL user.
+  AUTH_TYPE_ACL = 2;
+  // TLS client certificates (tls-auth-clients).
+  AUTH_TYPE_TLS = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of a service.
+message Service {
+  // Prefix of the channel names and keys of the service's rpcs and keyspace
+  // notifications, joined with ':'. Defaults to
+  // "<package>:<service>" for rpcs without a channel.
+  string key_prefix = 1;
+  // Default transport of the service's rpcs.
+  Transport transport = 2;
+  // Default consumer group of the service's stream consumers.
+  string consumer_group = 3;
+  // Keyspace notifications consumed by the service.
+  repeated Keyspace keyspace = 4;
+}
+
+// Transport is how messages travel through Redis.
+enum Transport {
+  // PUBSUB.
+  TRANSPORT_UNSPECIFIED = 0;
+  // PUBLISH / SUBSCRIBE and PSUBSCRIBE: fire and forget, delivered to every
+  // connected subscriber.
+  TRANSPORT_PUBSUB = 1;
+  // SPUBLISH / SSUBSCRIBE (Redis 7): Pub/Sub scoped to the shard owning the
+  // channel's hash slot.
+  TRANSPORT_SHARDED_PUBSUB = 2;
+  // XADD / XREAD / XREADGROUP: a persistent, replayable log with consumer
+  // groups.
+  TRANSPORT_STREAM = 3;
+  // LPUSH or RPUSH / BLPOP, BRPOP or BLMOVE: a work queue, each message
+  // consumed once.
+  TRANSPORT_LIST = 4;
+}
+
+// Keyspace describes keyspace notifications consumed by a service. Redis
+// publishes them when notify-keyspace-events is enabled.
+message Keyspace {
+  // Name of the notification, used in the operation id
+  // "<Service>.<name>". Defaults to one derived from the key or event.
+  string name = 1;
+  // Notification channel family.
+  KeyspaceKind kind = 2;
+  // KEYSPACE: the key or key pattern (glob) watched, relative to the
+  // service's key_prefix; required. KEYEVENT: optionally documents which
+  // keys the events concern.
+  string key = 3;
+  // Events of interest, e.g. "expired", "del", "set", "xadd". KEYSPACE:
+  // optional, restricts the documented payloads. KEYEVENT: required, one
+  // channel per event.
+  repeated string events = 4;
+  // Logical database of the notifications; defaults to 0.
+  int32 database = 5;
+  // Description of the notification.
+  string description = 6;
+}
+
+// KeyspaceKind selects the notification channels.
+enum KeyspaceKind {
+  // KEYSPACE.
+  KEYSPACE_KIND_UNSPECIFIED = 0;
+  // __keyspace@<db>__:<key>, carrying the event name.
+  KEYSPACE_KIND_KEYSPACE = 1;
+  // __keyevent@<db>__:<event>, carrying the key name.
+  KEYSPACE_KIND_KEYEVENT = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service consumes requests and answers each one on a reply channel.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service produces messages (the payload is the response, or the
+  // request when the response is google.protobuf.Empty).
+  PATTERN_PUBLISH = 2;
+  // The service consumes messages (the payload is the request).
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the Redis operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Channel name (Pub/Sub) or key (streams and lists), relative to the
+  // service's key_prefix. Pub/Sub subscribers may use glob patterns
+  // ("*", "?", "[...]").
+  string channel = 2;
+  // Transport-specific settings; the transport defaults to the service's.
+  oneof transport {
+    PubSub pubsub = 3;
+    Stream stream = 4;
+    List list = 5;
+  }
+  // REQUEST_REPLY: channel name or key replies are sent to, relative to the
+  // service's key_prefix, with the same transport as the request, e.g.
+  // "orders:replies:{request_id}". Defaults to a reply channel chosen by the
+  // requester.
+  string reply_channel = 6;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 7;
+}
+
+// PubSub settings.
+message PubSub {
+  // Use sharded Pub/Sub (SPUBLISH / SSUBSCRIBE).
+  bool sharded = 1;
+}
+
+// Stream settings.
+message Stream {
+  // Consumer group read with XREADGROUP; without one, consumers use XREAD.
+  string group = 1;
+  // Consumer name within the group, e.g. "worker-{hostname}".
+  string consumer = 2;
+  // With a group: the ID the group is created at (XGROUP CREATE), "$" for
+  // new entries only or "0" for the whole stream. Without a group: the ID
+  // XREAD starts after. Defaults to "$".
+  string start_id = 3;
+  // Read without acknowledgements (XREADGROUP NOACK).
+  bool no_ack = 4;
+  // Maximum entries per read (COUNT).
+  int64 count = 5;
+  // How long a read blocks waiting for entries (BLOCK); "0" blocks forever.
+  string block = 6;
+  // Pending entries idle for longer are claimed with XAUTOCLAIM.
+  string claim_min_idle = 7;
+  // Entries delivered more often are moved to the dead-letter stream.
+  int32 max_deliveries = 8;
+  // Dead-letter stream key, relative to the service's key_prefix.
+  string dead_letter = 9;
+  // Trimming applied by producers on XADD.
+  Trim trim = 10;
+  // Producers do not create the stream (XADD NOMKSTREAM).
+  bool no_mkstream = 11;
+  // Entry field holding the encoded payload. Defaults to "payload".
+  string field = 12;
+  // Store each top-level payload field as its own entry field instead:
+  // scalars in their JSON form without quotes, other values as JSON.
+  bool flatten = 13;
+}
+
+// Trim is the XADD trimming strategy.
+message Trim {
+  oneof strategy {
+    // MAXLEN: keep at most this many entries.
+    int64 max_len = 1;
+    // MINID: evict entries with an ID lower than this one.
+    string min_id = 2;
+  }
+  // Trim exactly (=) instead of approximately (~).
+  bool exact = 3;
+  // LIMIT: maximum entries evicted per XADD (approximate trimming only).
+  int64 limit = 4;
+}
+
+// List settings. By default producers LPUSH and consumers BRPOP, a FIFO
+// queue.
+message List {
+  // End producers push to.
+  End push = 1;
+  // End consumers pop from. Defaults to the end opposite to push (FIFO);
+  // the same end makes a stack.
+  End pop = 2;
+  // How long a pop blocks waiting for an element; "0" blocks forever.
+  string block = 3;
+  // Reliable queue: consumers atomically move each element to this list
+  // (BLMOVE) and remove it (LREM) once processed. Relative to the service's
+  // key_prefix.
+  string processing_list = 4;
+  // Producers cap the list with LTRIM after pushing.
+  int64 max_len = 5;
+}
+
+// End is an end of a list.
+enum End {
+  END_UNSPECIFIED = 0;
+  // The head (L commands).
+  END_LEFT = 1;
+  // The tail (R commands).
+  END_RIGHT = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message gives a message its own channel, documented even when no rpc uses
+// it.
+message Message {
+  // Channel name or key (no key_prefix applies).
+  string channel = 1;
+  // Transport of the channel.
+  Transport transport = 2;
+}

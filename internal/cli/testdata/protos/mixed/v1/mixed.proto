@@ -1,5 +1,5 @@
-// Order processing that runs on Temporal and publishes events on NATS: both
-// protocols in one AsyncAPI document.
+// Order processing that runs on Temporal, publishes events on NATS and
+// queues receipts on Redis: three protocols in one AsyncAPI document.
 syntax = "proto3";
 
 package mixed.v1;
@@ -7,13 +7,15 @@ package mixed.v1;
 import "asyncapi/v3/annotations.proto";
 import "google/protobuf/empty.proto";
 import "nats/asyncapi/v1/annotations.proto";
+import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
 
 option (asyncapi.v3.document) = {
   info: {title: "Orders", version: "1.0.0"}
   servers: [
     {name: "nats", host: "nats.example:4222", protocol: "nats"},
-    {name: "temporal", host: "temporal.example:7233", protocol: "temporal"}
+    {name: "temporal", host: "temporal.example:7233", protocol: "temporal"},
+    {name: "redis", host: "redis.example:6379", protocol: "redis"}
   ]
 };
 
@@ -40,6 +42,21 @@ service Events {
   // Published when an order completes.
   rpc Completed(google.protobuf.Empty) returns (stream OrderResult) {
     option (nats.asyncapi.v1.operation) = {subject: "{order_id}.completed"};
+  }
+}
+
+// Receipts, sent by a worker pool reading a Redis stream.
+service Receipts {
+  option (redis.asyncapi.v1.service) = {
+    key_prefix: "orders"
+    transport: TRANSPORT_STREAM
+    consumer_group: "receipts"
+  };
+  option (asyncapi.v3.service) = {servers: ["redis"]};
+
+  // Sends the receipt of a completed order.
+  rpc Send(OrderResult) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {channel: "receipts"};
   }
 }
 

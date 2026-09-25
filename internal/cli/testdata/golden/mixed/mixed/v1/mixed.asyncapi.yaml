@@ -5,8 +5,8 @@ info:
   title: Orders
   version: 1.0.0
   description: |-
-    Order processing that runs on Temporal and publishes events on NATS: both
-    protocols in one AsyncAPI document.
+    Order processing that runs on Temporal, publishes events on NATS and
+    queues receipts on Redis: three protocols in one AsyncAPI document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -16,6 +16,8 @@ info:
       description: The order workflow.
     - name: Events
       description: Order events, published by the workflow's activities.
+    - name: Receipts
+      description: Receipts, sent by a worker pool reading a Redis stream.
 servers:
   nats:
     host: nats.example:4222
@@ -24,6 +26,9 @@ servers:
     host: temporal.example:7233
     protocol: temporal
     x-temporal-namespace: orders
+  redis:
+    host: redis.example:6379
+    protocol: redis
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -69,6 +74,21 @@ channels:
     parameters:
       order_id:
         location: $message.payload#/orderId
+  orders.receipts:
+    address: orders:receipts
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/redis'
+    bindings:
+      x-redis:
+        type: stream
+        entryField: payload
+        consumerGroups:
+          - name: receipts
+            startId: $
+        bindingVersion: 0.1.0
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -102,6 +122,21 @@ operations:
     messages:
       - $ref: '#/channels/orders.order_id.completed/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.Events.Completed
+  Receipts.Send:
+    action: receive
+    channel:
+      $ref: '#/channels/orders.receipts'
+    summary: Sends the receipt of a completed order.
+    tags:
+      - name: Receipts
+    bindings:
+      x-redis:
+        command: XREADGROUP
+        group: receipts
+        bindingVersion: 0.1.0
+    messages:
+      - $ref: '#/channels/orders.receipts/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.Receipts.Send
 components:
   schemas:
     mixed.v1.Order:

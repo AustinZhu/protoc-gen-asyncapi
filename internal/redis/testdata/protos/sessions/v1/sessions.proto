@@ -1,0 +1,119 @@
+// Session management with keyspace notifications.
+syntax = "proto3";
+
+package sessions.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Sessions"
+    version: "2.0.0"
+  }
+  servers: [
+    {
+      name: "cluster"
+      host: "redis.acme.example:6379"
+      security: ["acl"]
+    },
+    {
+      name: "sentinel"
+      host: "sentinel.acme.example:26379"
+      security: ["password"]
+    },
+    {
+      name: "local"
+      host: "localhost:6379"
+      security: ["mtls"]
+    }
+  ]
+  security_schemes: [
+    {name: "acl"},
+    {name: "password"},
+    {
+      name: "mtls"
+      type: SECURITY_SCHEME_TYPE_X509
+    }
+  ]
+};
+option (redis.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "cluster"
+      mode: MODE_CLUSTER
+      tls: true
+      resp: 3
+      notify_keyspace_events: "Ex"
+    },
+    {
+      name: "sentinel"
+      mode: MODE_SENTINEL
+      sentinel_master: "sessions"
+      database: 2
+    }
+  ]
+  auth: [
+    {
+      scheme: "acl"
+      type: AUTH_TYPE_ACL
+    },
+    {
+      scheme: "password"
+      type: AUTH_TYPE_PASSWORD
+    },
+    {
+      scheme: "mtls"
+      type: AUTH_TYPE_TLS
+    }
+  ]
+};
+
+// Reacts to session expiry.
+service SessionReaper {
+  option (redis.asyncapi.v1.service) = {
+    key_prefix: "sessions"
+    keyspace: [
+      {
+        key: "{session_id}"
+        events: [
+          "expired",
+          "del"
+        ]
+        description: "Sessions that expire or are deleted."
+      },
+      {
+        name: "expirations"
+        kind: KEYSPACE_KIND_KEYEVENT
+        key: "*"
+        events: ["expired"]
+      },
+      {
+        kind: KEYSPACE_KIND_KEYEVENT
+        events: [
+          "evicted",
+          "xadd"
+        ]
+        database: 1
+      }
+    ]
+  };
+}
+
+// Broadcast when a session is revoked; documented without an rpc.
+message SessionRevoked {
+  option (redis.asyncapi.v1.message) = {channel: "sessions:revoked"};
+
+  string session_id = 1;
+}
+
+// Kept in a stream for audits.
+message LoginAttempt {
+  option (redis.asyncapi.v1.message) = {
+    channel: "sessions:logins"
+    transport: TRANSPORT_STREAM
+  };
+
+  string user = 1;
+  bool success = 2;
+}

@@ -15,6 +15,7 @@ import (
 	// Register the annotation extensions so options parse as typed values.
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/asyncapi/v3"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1"
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/temporal/asyncapi/v1"
 )
 
