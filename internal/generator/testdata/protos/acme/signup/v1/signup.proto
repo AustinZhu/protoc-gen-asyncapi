@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package acme.signup.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+service Signup {
+  rpc SignupWorkflow(SignupInput) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+}
+
+message SignupInput {
+  string email = 1 [(buf.validate.field).string.email = true, (buf.validate.field).required = true];
+  string username = 2 [(buf.validate.field).string = {min_len: 3, max_len: 32, pattern: "^[a-z0-9_]+$"}];
+  int32 age = 3 [(buf.validate.field).int32 = {gte: 13, lt: 130}];
+  uint64 credits = 4 [(buf.validate.field).uint64.gt = 0];
+  float score = 5 [(buf.validate.field).float = {gte: 0.1, lte: 0.9}];
+  repeated string tags = 6 [(buf.validate.field).repeated = {min_items: 1, max_items: 5, unique: true, items: {string: {min_len: 1}}}];
+  map<string, int32> quotas = 7 [(buf.validate.field).map = {max_pairs: 3, values: {int32: {gte: 0}}}];
+  string plan = 8 [(buf.validate.field).string = {in: ["free", "pro"]}];
+
+  oneof contact {
+    option (buf.validate.oneof).required = true;
+    string phone = 9;
+    string slack = 10;
+  }
+}

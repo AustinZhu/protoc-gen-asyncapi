@@ -19,7 +19,7 @@ concurrency:
 
 env:
   BUF_VERSION: "1.73.0"
-  # The only module published to the BSR: temporal/v1/options.proto.
+  # The only module published to the BSR: temporal/asyncapi/v1/options.proto.
   BSR_MODULE_PATH: proto
 
 jobs:
@@ -82,6 +82,15 @@ jobs:
           prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "$TAG" HEAD 2>/dev/null || true)"
           if [ -z "$prev" ]; then
             echo "::notice::No earlier release tag; skipping the breaking-change check."
+            exit 0
+          fi
+          # Semver: breaking changes need a major bump, or a minor bump while
+          # the major version is 0.
+          IFS=. read -r pmaj pmin _ <<< "${prev#v}"
+          IFS=. read -r nmaj nmin _ <<< "${TAG#v}"
+          if [ "$nmaj" != "$pmaj" ] || { [ "$nmaj" = 0 ] && [ "$nmin" != "$pmin" ]; }; then
+            echo "::notice::$TAG is a breaking release relative to $prev; reporting breaking changes without failing."
+            buf breaking "$BSR_MODULE_PATH" --against ".git#tag=${prev},subdir=${BSR_MODULE_PATH}" || true
             exit 0
           fi
           echo "Comparing $BSR_MODULE_PATH against $prev"

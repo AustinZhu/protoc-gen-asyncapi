@@ -20,6 +20,8 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
+      # Includes validation of every golden document against the AsyncAPI
+      # 3.0.0/3.1.0 JSON Schemas.
       - run: go test -race ./...
 
   generated:
@@ -34,10 +36,10 @@ jobs:
         with:
           setup_only: true
       - run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
-      - run: go install .
       - run: buf lint
+      - run: buf format --diff --exit-code
       - run: buf generate
-      - run: buf generate example/proto --template example/buf.gen.yaml
+      - run: buf generate --template examples/buf.gen.yaml
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
@@ -56,4 +58,3 @@ jobs:
           cache-dependency-path: tools/asyncapi-validate/package-lock.json
       - run: npm ci
       - run: node validate.mjs
-      - run: node validate.mjs ../../example/gen/asyncapi.yaml

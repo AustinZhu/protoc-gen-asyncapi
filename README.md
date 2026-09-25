@@ -1,11 +1,11 @@
 # protoc-gen-temporal-asyncapi
 
-A [buf](https://buf.build) / `protoc` plugin that turns Protobuf messages used as
-[Temporal](https://temporal.io) payloads into an **[AsyncAPI 3](https://www.asyncapi.com/docs/reference/specification/v3.1.0)**
-document describing your Workflows, Activities, Signals, Queries and Updates. The output is ready to open in
-[AsyncAPI Studio](https://studio.asyncapi.com) or any other AsyncAPI tool.
+A [buf](https://buf.build) / `protoc` plugin that turns [Temporal](https://temporal.io) Workflows, Activities,
+Signals, Queries and Updates declared as annotated Protobuf **services** into
+**[AsyncAPI 3.0 / 3.1](https://www.asyncapi.com/docs/reference/specification/v3.1.0)** documents. The output is
+ready to open in [AsyncAPI Studio](https://studio.asyncapi.com) or any other AsyncAPI tool.
 
-You annotate each input message with one option. The plugin produces:
+Each rpc is one Temporal operation: its request is the payload and its response is the result. The plugin produces:
 
 - one **channel** per operation, plus a result channel when there is a result, with its message bound;
 - one **operation** per primitive. Queries, Updates, and Workflow/Activity results use AsyncAPI's `reply`;
@@ -15,20 +15,21 @@ You annotate each input message with one option. The plugin produces:
   support;
 - **tags** that group each Workflow with its Signal, Query and Update handlers.
 
-The plugin generates documentation only. It does not generate code and never contacts a Temporal cluster.
+The plugin generates documentation only. It does not generate code and never contacts a Temporal cluster. Its
+sibling, [protoc-gen-nats-asyncapi](https://github.com/AustinZhu/protoc-gen-nats-asyncapi), does the same for NATS.
 
 ## Quick start
 
 ### 1. Install the plugin
 
 ```sh
-go install github.com/AustinZhu/protoc-gen-temporal-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-temporal-asyncapi/cmd/protoc-gen-temporal-asyncapi@latest
 ```
 
 Prebuilt binaries are also attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-temporal-asyncapi/releases),
 named `protoc-gen-temporal-asyncapi_<version>_<os>_<arch>.tar.gz`.
 
-### 2. Add the options file
+### 2. Depend on the options
 
 The options are published to the Buf Schema Registry as
 **[`buf.build/austin-zhu/temporal-asyncapi`](https://buf.build/austin-zhu/temporal-asyncapi)**.
@@ -38,48 +39,52 @@ Each release is labeled with its tag. Add it as a dependency in your `buf.yaml`:
 version: v2
 deps:
   - buf.build/austin-zhu/temporal-asyncapi        # latest
-  # - buf.build/austin-zhu/temporal-asyncapi:v0.1.2  # or pin a release label
+  # - buf.build/austin-zhu/temporal-asyncapi:v0.2.0  # or pin a release label
 ```
 
-Then run `buf dep update` and `import "temporal/v1/options.proto";`.
+Then run `buf dep update` and `import "temporal/asyncapi/v1/options.proto";`.
 
-Without buf, copy [`proto/temporal/v1/options.proto`](proto/temporal/v1/options.proto) into your proto tree at
-`temporal/v1/options.proto`. Each release archive also includes it. If you also want to use it from Go, the generated
-bindings are at `github.com/AustinZhu/protoc-gen-temporal-asyncapi/gen/temporalv1`.
+Without buf, copy [`proto/temporal/asyncapi/v1/options.proto`](proto/temporal/asyncapi/v1/options.proto) into your
+proto tree at `temporal/asyncapi/v1/options.proto`. Each release archive also includes it. The Go bindings are at
+`github.com/AustinZhu/protoc-gen-temporal-asyncapi/proto/temporal/asyncapi/v1`.
 
-### 3. Annotate your input messages
+### 3. Annotate your services
 
 ```proto
-import "temporal/v1/options.proto";
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
 
-// Processes a customer order from payment through fulfillment.
-message ProcessOrderInput {
-  option (temporal.v1.operation) = {
-    kind: OPERATION_KIND_WORKFLOW
-    result: "ProcessOrderResult"       // same package; may be nested: "Outer.Inner"
-    task_queue: "orders"
-    supports_continue_as_new: true
-    timeouts: {execution: "720h"}
-  };
-  string order_id = 1;
-}
+service Orders {
+  option (temporal.asyncapi.v1.service) = {task_queue: "orders"};
 
-message ProcessOrderResult { OrderStatus status = 1; }
+  // Processes a customer order from payment through fulfillment.
+  rpc ProcessOrder(ProcessOrderInput) returns (ProcessOrderResult) {
+    option (temporal.asyncapi.v1.operation).workflow = {
+      continue_as_new: true
+      execution_timeout: "720h"
+    };
+  }
 
-// Cancels the order if it has not shipped yet.
-message CancelOrderSignal {
-  option (temporal.v1.operation) = {
-    kind: OPERATION_KIND_SIGNAL
-    name: "CancelOrder"
-    workflows: "ProcessOrder"          // groups the handler with its workflow
-  };
-  string reason = 1;
+  // Cancels the order if it has not shipped yet.
+  rpc CancelOrder(CancelOrderInput) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+
+  // Returns the order's current status.
+  rpc GetStatus(google.protobuf.Empty) returns (OrderStatusResult) {
+    option (temporal.asyncapi.v1.operation).query = {};
+  }
 }
 ```
 
-`name` is optional. By default it is the message name with an `Input`, `Request`, `Args` or `Params` suffix removed,
-so `ProcessOrderInput` becomes the `ProcessOrder` workflow. Comments on messages, fields and enum values become
-descriptions in the generated document.
+- Names default to the rpc name, so `ProcessOrder` is the Workflow type. Set `name` when the registered name differs.
+- `google.protobuf.Empty` means "no payload" as a request and "no result" as a response.
+- A service's Signals, Queries and Updates belong to its Workflow when it has exactly one. Otherwise, list their rpc
+  names in `workflows`.
+- Comments on rpcs, messages, fields and enum values become descriptions in the generated document.
+
+Temporal payloads are usually named after their operation and often use `google.protobuf.Empty`, which buf's
+`STANDARD` lint category flags. [`buf.yaml`](buf.yaml) shows the `ignore_only` entries the example uses.
 
 ### 4. Generate
 
@@ -89,69 +94,85 @@ With buf (`buf.gen.yaml`):
 version: v2
 plugins:
   - local: protoc-gen-temporal-asyncapi
-    out: docs
-    strategy: all            # one document for all inputs; required when protos span several directories
+    out: docs/asyncapi
     opt:
-      - title=Acme Orders
       - version=1.0.0
-      - server-url=temporal.acme.internal:7233
+      - server_url=temporal.acme.internal:7233
       - namespace=orders
 ```
 
 With protoc:
 
 ```sh
-protoc -I proto -I third_party \
-  --temporal-asyncapi_out=docs \
-  --temporal-asyncapi_opt=title=Acme\ Orders,version=1.0.0 \
-  proto/acme/orders/v1/*.proto
+protoc -I proto --temporal-asyncapi_out=docs/asyncapi --temporal-asyncapi_opt=version=1.0.0 \
+  proto/acme/orders/v1/orders.proto
 ```
 
-[`example/`](example) contains a complete setup and its generated
-[`asyncapi.yaml`](example/gen/asyncapi.yaml). To check a document against the spec, run
-`npx @asyncapi/cli validate docs/asyncapi.yaml`.
+Each `.proto` file that declares operations produces `<path>.asyncapi.yaml` next to its source path, for example
+`docs/asyncapi/acme/orders/v1/orders.asyncapi.yaml`. Files that declare none produce nothing. With `merge=true`, all
+files go into one document instead, `asyncapi.yaml` by default; with buf, also set `strategy: all` so the plugin sees
+every file in one run.
+
+[`examples/`](examples) contains a complete setup and its generated
+[`orders.asyncapi.yaml`](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml).
 
 ## Annotation reference
 
-| Field | Applies to | Meaning |
+`(temporal.asyncapi.v1.service)`, on a service:
+
+| Field | Meaning |
+| --- | --- |
+| `task_queue` | Default task queue of the service's Workflows and Activities. |
+
+When a service has this option, every one of its rpcs must declare an operation. Without it, unannotated rpcs are
+ignored.
+
+`(temporal.asyncapi.v1.operation)`, on an rpc, sets exactly one kind:
+
+| Kind | Fields | Shape |
 | --- | --- | --- |
-| `kind` | all | **Required.** `OPERATION_KIND_WORKFLOW`, `_ACTIVITY`, `_SIGNAL`, `_QUERY` or `_UPDATE`. |
-| `name` | all | Name registered with the worker. Defaults to the message name minus `Input`/`Request`/`Args`/`Params`. |
-| `result` | all but Signals | Result message, resolved in the input's package. Leave it empty for a result-less Update or Activity. |
-| `task_queue` | all | Default task queue, if statically known. |
-| `supports_continue_as_new` | Workflows | Adds a continue-as-new operation and flags the binding. |
-| `workflows` | Signals, Queries, Updates | Workflow types that handle this message. |
-| `timeouts` | Workflows: `execution`, `run`, `task`. Activities: `schedule_to_close`, `start_to_close`, `schedule_to_start`, `heartbeat` | Go-style durations such as `"30s"` or `"1h30m"`. |
-| `retry_policy` | Workflows, Activities | `initial_interval`, `backoff_coefficient`, `maximum_interval`, `maximum_attempts`, `non_retryable_error_types`. |
+| `workflow` | `name`, `task_queue`, `continue_as_new`, `execution_timeout`, `run_timeout`, `task_timeout`, `retry_policy` | Result is the response; `Empty` for none. |
+| `activity` | `name`, `task_queue`, `schedule_to_close_timeout`, `start_to_close_timeout`, `schedule_to_start_timeout`, `heartbeat_timeout`, `retry_policy` | Result is the response; `Empty` for none. |
+| `signal` | `name`, `workflows` | Must return `google.protobuf.Empty`. |
+| `query` | `name`, `workflows` | Must return a result. |
+| `update` | `name`, `workflows` | Result is the response; `Empty` for none. |
 
-Generation fails, reporting `file:line:column` for every problem at once, when:
+- Timeouts and retry intervals are Go-style durations such as `"30s"` or `"1h30m"`.
+- `retry_policy` has `initial_interval`, `backoff_coefficient`, `maximum_interval`, `maximum_attempts` and
+  `non_retryable_error_types`.
+- `workflows` lists rpc names of Workflows in the same service.
 
-- `kind` is missing;
-- `result` can't be resolved, or resolves to another package;
-- two messages declare the same `(kind, name)`;
-- a field is used on a kind it doesn't apply to;
+Because each kind is its own message, protoc itself rejects fields that don't apply, such as a heartbeat timeout on a
+Workflow. The plugin then fails generation, reporting `file:line:column` for every problem at once, when:
+
+- an operation sets no kind, or an annotated service has an unannotated rpc;
+- an rpc streams;
+- a Signal returns something other than `Empty`, or a Query returns `Empty`;
+- `workflows` names something that isn't a Workflow rpc of the same service;
+- two rpcs declare the same `(kind, name)`, in any of the files being generated;
 - a duration is malformed.
 
-## Parameters
+## Options
 
 Pass these as `opt:` entries in buf, or as comma-separated `key=value` pairs in `--temporal-asyncapi_opt`.
 `protoc-gen-temporal-asyncapi --help` lists them too.
 
-| Key | Default | Meaning |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `path` | `asyncapi.yaml` | Output file, relative to `out`. |
-| `format` | from `path` | `yaml` or `json`. If unset, `.json` paths produce JSON. |
-| `services` | files being generated | Package glob of files to scan, such as `acme.orders.**` or `acme.*.v1`. `*` matches one segment and `**` matches any number. Repeat the key, or separate globs with `\|`. Also matches imported files, so dependencies can be documented. |
-| `title` | first package | `info.title` |
+| `format` | `yaml` | `yaml` or `json`. |
+| `merge` | `false` | Write one document for all files instead of one per file. |
+| `merge_file_name` | `asyncapi` | Base name of the merged document. |
+| `asyncapi_version` | `3.1.0` | `3.1.0` or `3.0.0`. The generated documents are otherwise identical. |
+| `perspective` | `client` | `client`: operations `send`, as seen by callers. `worker`: operations `receive`, as seen by the Worker hosting them. |
+| `title` | proto package | `info.title` |
 | `version` | `0.0.0` | `info.version` |
 | `description` | generated overview | `info.description` |
-| `id` | `urn:temporal:<first package>` | Document `id`. |
-| `server-url` | none | Temporal frontend address (`host:port`, or a URL). Emits a `temporal` server. |
+| `id` | `urn:temporal:<package>` | Document `id`. |
+| `server_url` | none | Temporal frontend address (`host:port`, or a URL). Emits a `temporal` server. |
 | `namespace` | none | Temporal namespace, recorded as `x-temporal-namespace` on the server. |
-| `perspective` | `client` | `client`: operations `send`, as seen by callers. `worker`: operations `receive`, as seen by the Worker hosting them. |
-| `trim-unused-schemas` | `false` | Emit only schemas reachable from an operation. By default every message and enum in the scanned files is included. |
-| `with-protovalidate` | `true` | Translate `buf.validate` constraints when `buf/validate/validate.proto` is among the inputs. Without it, this setting has no effect. |
-| `use-proto-names` | `false` | Use `.proto` field names instead of lowerCamelCase JSON names. Match this to your data converter. |
+| `json_names` | `true` | lowerCamelCase JSON field names; `false` uses `.proto` names. Match this to your data converter. |
+| `trim_unused_schemas` | `false` | Emit only schemas reachable from an operation. By default every message and enum in the documented files is included. |
+| `protovalidate` | `true` | Translate `buf.validate` constraints when `buf/validate/validate.proto` is among the inputs. |
 
 ## How Temporal maps onto AsyncAPI
 
@@ -179,11 +200,11 @@ These are the `client` perspective actions. With `perspective=worker`, every ope
   - AsyncAPI has no official Temporal binding and only accepts `x-` extensions for unknown protocols, hence
     `x-temporal`.
   - Channel bindings carry `kind`, `name` and `taskQueue`.
-  - Operation bindings also carry `supportsContinueAsNew`, `workflows`, `timeouts` and `retryPolicy`.
+  - Operation bindings also carry `continueAsNew`, `workflows`, `timeouts` and `retryPolicy`.
 - **Tags.**
   - Every operation gets a kind tag: `Workflows`, `Activities`, `Signals`, `Queries` or `Updates`, each linked to the
     Temporal docs.
-  - A Workflow and every handler that lists it in `workflows` share a `workflow:<Name>` tag.
+  - A Workflow and its Signal, Query and Update handlers share a `workflow:<Name>` tag.
   - When more than one package is documented, each operation also gets a proto-package tag.
 
 ## How Protobuf maps onto JSON Schema
@@ -246,19 +267,20 @@ could only fake these as HTTP endpoints that don't exist.
 
 ## Development
 
+`make` runs everything CI runs. The individual targets:
+
 ```sh
-go test ./...                                   # unit + golden tests (no protoc/buf needed)
-go test ./internal/plugin -update               # accept changed golden files under testdata/
-(cd tools/asyncapi-validate && npm ci && node validate.mjs)   # spec-validate every golden document
-buf generate                                    # regenerate gen/temporalv1 after editing options.proto
-go install . && buf generate example/proto --template example/buf.gen.yaml   # regenerate the example
+make test       # unit and golden tests; every golden document is validated against the AsyncAPI 3.0.0/3.1.0 JSON Schemas
+make golden     # accept changed golden files under internal/generator/testdata/golden
+make lint       # go vet, gofmt, buf lint and buf format
+make generate   # regenerate the Go bindings after editing options.proto
+make examples   # regenerate examples/asyncapi
+make validate   # also check every golden document with the official @asyncapi/parser (needs Node.js)
+make check      # fail if generated files are out of date
 ```
 
-Golden cases live in `testdata/<case>/`. Each case holds:
-
-- `.proto` inputs;
-- an optional `params` file;
-- either `expected.asyncapi.{yaml,json}` or `expected.error`.
+Test protos live in `internal/generator/testdata/protos`, and each golden case writes its output under
+`internal/generator/testdata/golden/<case>/`. The example in `examples/proto` is a golden case too.
 
 ### Releasing
 
@@ -271,9 +293,10 @@ The workflow then runs these steps in order. If any step fails, the later ones d
 
 1. Tests and spec validation, the same checks as CI.
 2. BSR checks: `buf lint` on the `proto` module, `buf breaking` against the previous release tag, and a check that
-   `buf.yaml` names the module and that the `BUF_TOKEN` secret is set.
+   `buf.yaml` names the module and that the `BUF_TOKEN` secret is set. Breaking changes are allowed only on a major
+   version bump, or on a minor bump while the major version is 0.
 3. GoReleaser publishes the GitHub release and binaries. For a manual run, the tag is created just before this.
-4. Only the `proto` module (`temporal/v1/options.proto`) is pushed to `buf.build/austin-zhu/temporal-asyncapi`,
+4. Only the `proto` module (`temporal/asyncapi/v1/options.proto`) is pushed to `buf.build/austin-zhu/temporal-asyncapi`,
    labeled with the tag. The example module is never published, and nothing is published from pull requests, forks or
    branch pushes.
 

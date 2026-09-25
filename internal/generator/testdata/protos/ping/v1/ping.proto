@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package ping.v1;
+
+import "temporal/asyncapi/v1/options.proto";
+
+service Ping {
+  rpc Ping(PingInput) returns (Pong) {
+    option (temporal.asyncapi.v1.operation).activity = {};
+  }
+}
+
+message PingInput {
+  string ping_message = 1;
+}
+
+message Pong {
+  string pong_message = 1;
+}

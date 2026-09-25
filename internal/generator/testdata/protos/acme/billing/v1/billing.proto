@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package acme.billing.v1;
+
+import "acme/shipping/v1/shipping.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+service Billing {
+  // Bills a customer.
+  rpc CreateInvoice(CreateInvoiceInput) returns (Invoice) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+
+  // Bills for a shipment; its input comes from another package.
+  rpc BillShipment(acme.shipping.v1.ShipParcelInput) returns (Invoice) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+}
+
+message CreateInvoiceInput {
+  string customer_id = 1;
+}
+
+message Invoice {
+  string id = 1;
+}

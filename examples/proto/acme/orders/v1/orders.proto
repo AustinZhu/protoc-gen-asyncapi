@@ -1,0 +1,101 @@
+// Order processing for the ACME shop, run on Temporal.
+syntax = "proto3";
+
+package acme.orders.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+// The order workflow and the handlers it exposes to callers.
+service Orders {
+  option (temporal.asyncapi.v1.service) = {task_queue: "orders"};
+
+  // Processes a customer order from payment through fulfillment.
+  rpc ProcessOrder(ProcessOrderInput) returns (ProcessOrderResult) {
+    option (temporal.asyncapi.v1.operation).workflow = {
+      continue_as_new: true
+      execution_timeout: "720h"
+    };
+  }
+
+  // Cancels the order if it has not shipped yet.
+  rpc CancelOrder(CancelOrderInput) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+
+  // Returns the order's current status.
+  rpc GetStatus(google.protobuf.Empty) returns (OrderStatusResult) {
+    option (temporal.asyncapi.v1.operation).query = {};
+  }
+
+  // Changes the shipping address; rejected once the order has shipped.
+  rpc UpdateAddress(UpdateAddressInput) returns (UpdateAddressResult) {
+    option (temporal.asyncapi.v1.operation).update = {};
+  }
+}
+
+// Activities used by the order workflow.
+service Payments {
+  option (temporal.asyncapi.v1.service) = {task_queue: "payments"};
+
+  // Charges the customer's card.
+  rpc ChargeCard(ChargeCardInput) returns (ChargeCardResult) {
+    option (temporal.asyncapi.v1.operation).activity = {
+      start_to_close_timeout: "30s"
+      retry_policy: {
+        initial_interval: "1s"
+        backoff_coefficient: 2
+        maximum_attempts: 5
+      }
+    };
+  }
+}
+
+message ProcessOrderInput {
+  // Caller-chosen idempotency key.
+  string order_id = 1;
+  repeated LineItem items = 2;
+  google.protobuf.Timestamp placed_at = 3;
+}
+
+message ProcessOrderResult {
+  OrderStatus status = 1;
+}
+
+message LineItem {
+  string sku = 1;
+  // Number of units; protobuf JSON encodes int64 as a string.
+  int64 quantity = 2;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_COMPLETED = 1;
+  ORDER_STATUS_CANCELLED = 2;
+}
+
+message CancelOrderInput {
+  string reason = 1;
+}
+
+message OrderStatusResult {
+  OrderStatus status = 1;
+}
+
+message UpdateAddressInput {
+  string address = 1;
+}
+
+message UpdateAddressResult {
+  bool accepted = 1;
+}
+
+message ChargeCardInput {
+  string order_id = 1;
+  string card_token = 2;
+}
+
+message ChargeCardResult {
+  string charge_id = 1;
+}

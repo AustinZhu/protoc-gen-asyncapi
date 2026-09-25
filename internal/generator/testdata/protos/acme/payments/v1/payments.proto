@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package acme.payments.v1;
+
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+service Payments {
+  option (temporal.asyncapi.v1.service) = {task_queue: "payments"};
+
+  // Charges a card. The workflow does not consume a result.
+  rpc ChargeCard(ChargeCardRequest) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).activity = {
+      start_to_close_timeout: "30s"
+      heartbeat_timeout: "5s"
+    };
+  }
+
+  // Refunds a charge and reports the refund.
+  rpc Refund(RefundRequest) returns (Refund.Receipt) {
+    option (temporal.asyncapi.v1.operation).activity = {
+      name: "payments.refund"
+      task_queue: "refunds"
+    };
+  }
+}
+
+message ChargeCardRequest {
+  string card_token = 1;
+  int64 amount_cents = 2;
+}
+
+message RefundRequest {
+  string charge_id = 1;
+}
+
+message Refund {
+  message Receipt {
+    string refund_id = 1;
+  }
+}

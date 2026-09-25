@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package temporal.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-temporal-asyncapi/proto/temporal/asyncapi/v1;asyncapiv1";
+
+// Service-level defaults for the Temporal operations declared by its rpcs.
+//
+//   service Orders {
+//     option (temporal.asyncapi.v1.service) = {task_queue: "orders"};
+//     ...
+//   }
+//
+// Every rpc of a service carrying this option must declare an operation.
+extend google.protobuf.ServiceOptions {
+  Service service = 58320;
+}
+
+// Declares which Temporal primitive an rpc is. The rpc's request is the
+// payload and its response is the result; google.protobuf.Empty means "none".
+//
+//   rpc ProcessOrder(ProcessOrderInput) returns (ProcessOrderResult) {
+//     option (temporal.asyncapi.v1.operation).workflow = {continue_as_new: true};
+//   }
+extend google.protobuf.MethodOptions {
+  Operation operation = 58320;
+}
+
+message Service {
+  // Default task queue for the service's Workflows and Activities.
+  string task_queue = 1;
+}
+
+message Operation {
+  // Exactly one kind must be set.
+  oneof kind {
+    Workflow workflow = 1;
+    Activity activity = 2;
+    Signal signal = 3;
+    Query query = 4;
+    Update update = 5;
+  }
+}
+
+// A Workflow type. Its result is the rpc's response.
+message Workflow {
+  // Workflow type name registered with the Worker. Defaults to the rpc name.
+  string name = 1;
+  // Overrides the service's task queue.
+  string task_queue = 2;
+  // Whether the Workflow may continue-as-new into itself with this input.
+  bool continue_as_new = 3;
+  // Timeouts are Go-style durations such as "30s" or "1h30m".
+  // Total time for the Workflow Execution, including retries and continue-as-new.
+  string execution_timeout = 4;
+  // Time for a single Workflow Run.
+  string run_timeout = 5;
+  // Time for a single Workflow Task.
+  string task_timeout = 6;
+  RetryPolicy retry_policy = 7;
+}
+
+// An Activity type. Its result is the rpc's response.
+message Activity {
+  // Activity type name registered with the Worker. Defaults to the rpc name.
+  string name = 1;
+  // Overrides the service's task queue.
+  string task_queue = 2;
+  // Timeouts are Go-style durations such as "30s" or "1h30m".
+  // Total time for the Activity Execution, including retries.
+  string schedule_to_close_timeout = 3;
+  // Time for a single Activity Task Execution.
+  string start_to_close_timeout = 4;
+  // Time an Activity Task may wait in the task queue.
+  string schedule_to_start_timeout = 5;
+  // Maximum time between heartbeats.
+  string heartbeat_timeout = 6;
+  RetryPolicy retry_policy = 7;
+}
+
+// A Signal handler. The rpc must return google.protobuf.Empty.
+message Signal {
+  // Signal name. Defaults to the rpc name.
+  string name = 1;
+  // rpc names of the Workflows in this service that handle it. Defaults to the
+  // service's only Workflow, if it has exactly one.
+  repeated string workflows = 2;
+}
+
+// A Query handler. Its result is the rpc's response, which must not be
+// google.protobuf.Empty.
+message Query {
+  // Query name. Defaults to the rpc name.
+  string name = 1;
+  // rpc names of the Workflows in this service that handle it. Defaults to the
+  // service's only Workflow, if it has exactly one.
+  repeated string workflows = 2;
+}
+
+// An Update handler. Its result is the rpc's response.
+message Update {
+  // Update name. Defaults to the rpc name.
+  string name = 1;
+  // rpc names of the Workflows in this service that handle it. Defaults to the
+  // service's only Workflow, if it has exactly one.
+  repeated string workflows = 2;
+}
+
+// Mirrors temporal.api.common.v1.RetryPolicy; intervals are Go-style durations.
+message RetryPolicy {
+  string initial_interval = 1;
+  double backoff_coefficient = 2;
+  string maximum_interval = 3;
+  // 0 means unlimited.
+  int32 maximum_attempts = 4;
+  repeated string non_retryable_error_types = 5;
+}

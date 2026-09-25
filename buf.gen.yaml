@@ -1,9 +1,8 @@
-# Regenerates the committed Go bindings for proto/temporal/v1/options.proto.
+# Regenerates the Go bindings of the options (`make generate`).
 version: v2
 inputs:
   - directory: proto
 plugins:
   - local: protoc-gen-go
-    out: gen
-    opt:
-      - module=github.com/AustinZhu/protoc-gen-temporal-asyncapi/gen
+    out: proto
+    opt: paths=source_relative

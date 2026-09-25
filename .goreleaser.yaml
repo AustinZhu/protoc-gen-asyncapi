@@ -3,7 +3,7 @@ version: 2
 project_name: protoc-gen-temporal-asyncapi
 
 builds:
-  - main: .
+  - main: ./cmd/protoc-gen-temporal-asyncapi
     binary: protoc-gen-temporal-asyncapi
     env:
       - CGO_ENABLED=0
@@ -12,7 +12,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/AustinZhu/protoc-gen-temporal-asyncapi/internal/plugin.Version={{ .Version }}
+      - -s -w -X main.version={{ .Version }}
 
 archives:
   # protoc-gen-temporal-asyncapi_<version>_<os>_<arch>.tar.gz, the naming
@@ -24,7 +24,7 @@ archives:
         formats: [zip]
     files:
       - README.md
-      - proto/temporal/v1/options.proto
+      - proto/temporal/asyncapi/v1/options.proto
 
 checksum:
   name_template: checksums.txt

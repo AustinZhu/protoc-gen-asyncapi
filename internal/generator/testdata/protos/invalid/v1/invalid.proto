@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package invalid.v1;
+
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+message M {}
+
+service Invalid {
+  option (temporal.asyncapi.v1.service) = {task_queue: "q"};
+
+  rpc NoKind(M) returns (M) {
+    option (temporal.asyncapi.v1.operation) = {};
+  }
+
+  rpc Unannotated(M) returns (M);
+
+  rpc SignalWithResult(M) returns (M) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+
+  rpc QueryWithoutResult(M) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).query = {};
+  }
+
+  rpc Streaming(stream M) returns (M) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+
+  rpc BadDuration(M) returns (M) {
+    option (temporal.asyncapi.v1.operation).workflow = {run_timeout: "soon"};
+  }
+
+  rpc BadLink(M) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {workflows: "Missing"};
+  }
+}

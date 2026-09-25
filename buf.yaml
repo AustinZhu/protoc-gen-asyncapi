@@ -1,14 +1,25 @@
-# Workspace: the temporal/v1 options module and the example that uses it.
-# Only the named `proto` module is published to the BSR (see release.yaml);
-# the example module is intentionally unnamed.
+# Workspace: the temporal/asyncapi/v1 options module and the example that uses
+# it. Only the named `proto` module is published to the BSR (see
+# .github/workflows/release.yaml); the example module is intentionally unnamed.
 version: v2
 modules:
   - path: proto
     name: buf.build/austin-zhu/temporal-asyncapi
-  - path: example/proto
+  - path: examples/proto
 lint:
   use:
     - STANDARD
+  ignore_only:
+    # Temporal payloads are named after their operation (…Input / …Result)
+    # and several operations take or return google.protobuf.Empty.
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - examples/proto/acme
+    RPC_REQUEST_STANDARD_NAME:
+      - examples/proto/acme
+    RPC_RESPONSE_STANDARD_NAME:
+      - examples/proto/acme
+    SERVICE_SUFFIX:
+      - examples/proto/acme
 breaking:
   use:
     - FILE

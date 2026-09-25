@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package acme.shipping.v1;
+
+import "temporal/asyncapi/v1/options.proto";
+
+service Shipping {
+  // Ships a parcel. Its result shares its short name with billing's Invoice.
+  rpc ShipParcel(ShipParcelInput) returns (Invoice) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+}
+
+message ShipParcelInput {
+  string address = 1;
+}
+
+message Invoice {
+  string tracking_number = 1;
+}

@@ -1,1 +1,0 @@
-main.proto:8:1: message main.v1.DoInput: result "other.v1.Result" is in package "other.v1"; results must be in the input's package "main.v1"

@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package dup.v1;
+
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+message M {}
+
+service First {
+  rpc Poke(M) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+}
+
+service Second {
+  rpc Poke(M) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+
+  // Same name, different kind: allowed.
+  rpc PokeQuery(M) returns (M) {
+    option (temporal.asyncapi.v1.operation).query = {name: "Poke"};
+  }
+}

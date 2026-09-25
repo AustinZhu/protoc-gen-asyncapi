@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package acme.cart.v1;
+
+import "google/protobuf/empty.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+// A shopping cart and its handlers. With a single workflow in the service,
+// every handler belongs to it without listing `workflows`.
+service Cart {
+  // A shopping cart that lives as long as the session.
+  rpc CartWorkflow(CartInput) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).workflow = {task_queue: "carts"};
+  }
+
+  // Adds an item to the cart.
+  rpc AddItem(AddItemRequest) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).signal = {};
+  }
+
+  // Returns the current cart contents.
+  rpc GetCart(google.protobuf.Empty) returns (CartState) {
+    option (temporal.asyncapi.v1.operation).query = {};
+  }
+
+  // Checks out the cart, validating stock before accepting.
+  rpc Checkout(CheckoutRequest) returns (CheckoutResult) {
+    option (temporal.asyncapi.v1.operation).update = {};
+  }
+
+  // Clears the cart; completes with no result.
+  rpc Clear(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (temporal.asyncapi.v1.operation).update = {name: "clear"};
+  }
+}
+
+message CartInput {
+  string session_id = 1;
+}
+
+message AddItemRequest {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message CartState {
+  repeated string skus = 1;
+}
+
+message CheckoutRequest {
+  string payment_method = 1;
+}
+
+message CheckoutResult {
+  string order_id = 1;
+}
