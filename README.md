@@ -247,4 +247,4 @@ Golden cases live in `testdata/<case>/`. Each case holds:
 - an optional `params` file;
 - either `expected.asyncapi.{yaml,json}` or `expected.error`.
 
-Releases are cut by pushing a `v*` tag. CI runs the test suite, then GoReleaser publishes the binaries.
+Releases are cut by pushing a `v*` tag, or by running the **release** workflow manually with a version (it creates the tag). CI runs the test suite, then GoReleaser publishes the binaries.
