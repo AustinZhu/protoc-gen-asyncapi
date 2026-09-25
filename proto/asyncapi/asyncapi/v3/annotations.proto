@@ -1,0 +1,353 @@
+// Protocol-neutral AsyncAPI 3 annotations, shared by every protoc-gen-asyncapi
+// protocol (NATS, Temporal, ...).
+//
+// Every annotation is optional. The generators infer channels, operations
+// and payload schemas from services and messages; these annotations add the
+// parts of an AsyncAPI document that cannot be inferred (info, servers,
+// security) and override or extend what is inferred (summaries, tags,
+// examples, ...). Protocol specifics (NATS subjects, Temporal workflow kinds,
+// ...) live in each protocol's own annotation package.
+//
+// Descriptions default to the leading comments of the annotated element.
+//
+// Escape hatches: every object that AsyncAPI lets carry bindings or
+// specification extensions has
+//   - `bindings`: protocol bindings as JSON, keyed by protocol, e.g.
+//     bindings: [{protocol: "kafka", json: '{"bindingVersion": "0.5.0"}'}]
+//   - `extensions`: specification extensions as JSON, keyed by "x-..." name,
+//     e.g. extensions: [{key: "x-team", value: '"orders"'}]
+// so any official or custom binding can be expressed without new
+// annotations.
+syntax = "proto3";
+
+package asyncapi.v3;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/asyncapi/v3;asyncapiv3";
+
+// Extension numbers are taken from the range reserved for organisation
+// internal use (50000-99999). One number is used for every options message.
+extend google.protobuf.FileOptions {
+  // Document-wide settings. When several files end up in one AsyncAPI
+  // document, the settings of all files, and of the files they import, are
+  // combined.
+  Document document = 58300;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Defaults for every operation of the service.
+  Service service = 58300;
+}
+
+extend google.protobuf.MethodOptions {
+  // Overrides for the operation generated for an rpc.
+  Operation operation = 58300;
+}
+
+extend google.protobuf.MessageOptions {
+  // Overrides for the message generated for a Protobuf message.
+  Message message = 58300;
+}
+
+extend google.protobuf.FieldOptions {
+  // Extra schema information for a field.
+  Field field = 58300;
+}
+
+// ---------------------------------------------------------------------------
+// Document
+// ---------------------------------------------------------------------------
+
+message Document {
+  Info info = 1;
+  // Document id, e.g. "urn:acme:orders".
+  string id = 2;
+  // Default content type of messages. Defaults to application/json
+  // (application/protobuf with payload=protobuf).
+  string default_content_type = 3;
+  repeated Server servers = 4;
+  repeated SecurityScheme security_schemes = 5;
+  // Tags declared at document level (info.tags).
+  repeated Tag tags = 6;
+  ExternalDocs external_docs = 7;
+  // Specification extensions of the document root.
+  map<string, string> extensions = 8;
+}
+
+// Binding is a protocol binding object written as JSON.
+message Binding {
+  // Protocol key, e.g. "kafka", "amqp", "mqtt", "ws", "ros2", or "x-..." for
+  // an unofficial binding.
+  string protocol = 1;
+  // The binding object as JSON, e.g. '{"bindingVersion": "0.5.0"}'.
+  string json = 2;
+}
+
+message Info {
+  // Defaults to the service name when the document has a single service,
+  // else to the package name.
+  string title = 1;
+  // Defaults to 0.0.0; the `version` plugin option overrides it.
+  string version = 2;
+  // Defaults to the comments of the `package` (or `syntax`) statement.
+  string description = 3;
+  // Short summary, prepended to the description (AsyncAPI has no
+  // info.summary).
+  string summary = 4;
+  string terms_of_service = 5;
+  Contact contact = 6;
+  License license = 7;
+  map<string, string> extensions = 8;
+}
+
+message Contact {
+  string name = 1;
+  string url = 2;
+  string email = 3;
+}
+
+message License {
+  // Required.
+  string name = 1;
+  string url = 2;
+}
+
+message Tag {
+  string name = 1;
+  string description = 2;
+  ExternalDocs external_docs = 3;
+}
+
+message ExternalDocs {
+  string url = 1;
+  string description = 2;
+}
+
+message Server {
+  // Key of the server in the document, e.g. "production". Required.
+  string name = 1;
+  // Host, optionally with port, e.g. "nats.example.com:4222". Required.
+  string host = 2;
+  // Protocol, e.g. "nats" or "temporal". Defaults to the protocol of the
+  // generator when the document describes a single protocol.
+  string protocol = 3;
+  string protocol_version = 4;
+  string pathname = 5;
+  string title = 6;
+  string summary = 7;
+  string description = 8;
+  repeated ServerVariable variables = 9;
+  // Names of security schemes required to connect.
+  repeated string security = 10;
+  repeated Tag tags = 11;
+  ExternalDocs external_docs = 12;
+  repeated Binding bindings = 13;
+  map<string, string> extensions = 14;
+}
+
+message ServerVariable {
+  string name = 1;
+  repeated string enum = 2;
+  string default = 3;
+  string description = 4;
+  repeated string examples = 5;
+}
+
+// SecurityScheme mirrors the AsyncAPI Security Scheme Object.
+message SecurityScheme {
+  // Key of the scheme in components.securitySchemes. Required.
+  string name = 1;
+  // Required, unless a protocol annotation derives it (e.g. the NATS auth
+  // type).
+  SecuritySchemeType type = 2;
+  string description = 3;
+  // apiKey: "user" or "password"; httpApiKey: "query", "header" or "cookie".
+  string in = 4;
+  // httpApiKey: name of the header, query parameter or cookie.
+  string parameter_name = 5;
+  // http: e.g. "bearer" or "basic".
+  string scheme = 6;
+  // http bearer: e.g. "JWT".
+  string bearer_format = 7;
+  // openIdConnect: OpenID Connect discovery URL.
+  string open_id_connect_url = 8;
+  // oauth2 / openIdConnect: scopes required.
+  repeated string scopes = 9;
+  // oauth2: supported flows.
+  OAuthFlows flows = 10;
+  map<string, string> extensions = 11;
+}
+
+message OAuthFlows {
+  OAuthFlow implicit = 1;
+  OAuthFlow password = 2;
+  OAuthFlow client_credentials = 3;
+  OAuthFlow authorization_code = 4;
+}
+
+message OAuthFlow {
+  string authorization_url = 1;
+  string token_url = 2;
+  string refresh_url = 3;
+  // Scope name to description.
+  map<string, string> available_scopes = 4;
+}
+
+enum SecuritySchemeType {
+  SECURITY_SCHEME_TYPE_UNSPECIFIED = 0;
+  SECURITY_SCHEME_TYPE_USER_PASSWORD = 1;
+  SECURITY_SCHEME_TYPE_API_KEY = 2;
+  SECURITY_SCHEME_TYPE_X509 = 3;
+  SECURITY_SCHEME_TYPE_SYMMETRIC_ENCRYPTION = 4;
+  SECURITY_SCHEME_TYPE_ASYMMETRIC_ENCRYPTION = 5;
+  SECURITY_SCHEME_TYPE_HTTP_API_KEY = 6;
+  SECURITY_SCHEME_TYPE_HTTP = 7;
+  SECURITY_SCHEME_TYPE_OAUTH2 = 8;
+  SECURITY_SCHEME_TYPE_OPEN_ID_CONNECT = 9;
+  SECURITY_SCHEME_TYPE_PLAIN = 10;
+  SECURITY_SCHEME_TYPE_SCRAM_SHA256 = 11;
+  SECURITY_SCHEME_TYPE_SCRAM_SHA512 = 12;
+  SECURITY_SCHEME_TYPE_GSSAPI = 13;
+}
+
+// ---------------------------------------------------------------------------
+// Service and operation
+// ---------------------------------------------------------------------------
+
+message Service {
+  // Tags added to every operation of the service (after the service tag).
+  repeated Tag tags = 1;
+  ExternalDocs external_docs = 2;
+  // Security schemes required by every operation, unless overridden.
+  repeated string security = 3;
+  // Servers the service's channels are available on. Defaults to all.
+  repeated string servers = 4;
+  // Leaves the service out of the document.
+  bool skip = 5;
+}
+
+message Operation {
+  // Operation id. Defaults to a protocol specific id.
+  string operation_id = 1;
+  string title = 2;
+  // Defaults to the first sentence of the rpc comment.
+  string summary = 3;
+  // Defaults to the rpc comment.
+  string description = 4;
+  repeated Tag tags = 5;
+  ExternalDocs external_docs = 6;
+  // Overrides Service.security.
+  repeated string security = 7;
+  // Metadata of the operation's channel.
+  Channel channel = 8;
+  // Leaves the rpc out of the document.
+  bool skip = 9;
+  // Where replies are sent, for request/reply operations.
+  ReplyAddress reply_address = 10;
+  repeated Binding bindings = 11;
+  map<string, string> extensions = 12;
+}
+
+message ReplyAddress {
+  string description = 1;
+  // Runtime expression, e.g. "$message.header#/replyTo".
+  string location = 2;
+}
+
+// Channel metadata. Addresses are protocol specific and set by protocol
+// annotations or inferred.
+message Channel {
+  // Channel id. Defaults to one derived from the address.
+  string id = 1;
+  string title = 2;
+  string summary = 3;
+  string description = 4;
+  // Descriptions of address parameters. Parameters are otherwise bound to
+  // payload fields with the same name.
+  repeated Parameter parameters = 5;
+  // Overrides Service.servers.
+  repeated string servers = 6;
+  repeated Tag tags = 7;
+  ExternalDocs external_docs = 8;
+  repeated Binding bindings = 9;
+  map<string, string> extensions = 10;
+}
+
+message Parameter {
+  // Parameter name as it appears in the address, e.g. "order_id".
+  string name = 1;
+  string description = 2;
+  repeated string enum = 3;
+  string default = 4;
+  repeated string examples = 5;
+  // Runtime expression, e.g. "$message.payload#/orderId".
+  string location = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Message and field
+// ---------------------------------------------------------------------------
+
+message Message {
+  // Machine friendly name. Defaults to the message name.
+  string name = 1;
+  string title = 2;
+  // Defaults to the first sentence of the message comment.
+  string summary = 3;
+  // Defaults to the message comment.
+  string description = 4;
+  // Overrides Document.default_content_type.
+  string content_type = 5;
+  // Message headers.
+  repeated Header headers = 6;
+  // Runtime expression locating the correlation ID, e.g.
+  // "$message.header#/Trace-Id". See also Field.correlation_id.
+  string correlation_id = 7;
+  repeated Example examples = 8;
+  repeated Tag tags = 9;
+  ExternalDocs external_docs = 10;
+  // Metadata of the message's own channel, for protocols that give messages
+  // a channel (e.g. a NATS subject on the message).
+  Channel channel = 11;
+  // Description of the correlation ID.
+  string correlation_id_description = 12;
+  repeated Binding bindings = 13;
+  map<string, string> extensions = 14;
+}
+
+message Header {
+  // Header name, e.g. "Trace-Id".
+  string name = 1;
+  string description = 2;
+  bool required = 3;
+  repeated string enum = 4;
+  string pattern = 5;
+  // JSON Schema format, e.g. "uuid" or "date-time".
+  string format = 6;
+  repeated string examples = 7;
+}
+
+// Example mirrors the AsyncAPI Message Example Object.
+message Example {
+  string name = 1;
+  string summary = 2;
+  // Payload as JSON (Protobuf JSON mapping).
+  string payload = 3;
+  map<string, string> headers = 4;
+}
+
+message Field {
+  // Examples as JSON values, e.g. "\"ord_123\"" or "42".
+  repeated string examples = 1;
+  // Marks the field as required. Fields using proto2 `required`,
+  // buf.validate `required` or google.api.field_behavior = REQUIRED are
+  // required automatically.
+  bool required = 2;
+  // Marks the field as correlation ID of its message.
+  bool correlation_id = 3;
+  // JSON Schema format, e.g. "uuid", "email", "uri".
+  string format = 4;
+  // Hides the field from the generated schema.
+  bool hidden = 5;
+}

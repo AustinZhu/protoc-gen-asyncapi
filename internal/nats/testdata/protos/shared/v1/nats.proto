@@ -1,0 +1,59 @@
+// Shared NATS settings imported by the other files.
+syntax = "proto3";
+
+package shared.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "nats/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  servers: [{
+    name: "hub"
+    host: "{region}.nats.example:4222"
+    variables: [{name: "region", enum: ["eu", "us"], default: "eu"}]
+    security: ["user", "token", "nkey", "mtls", "callout"]
+  }]
+  security_schemes: [
+    {name: "user"},
+    {name: "token"},
+    {name: "nkey"},
+    {name: "mtls"},
+    {name: "callout"}
+  ]
+};
+
+option (nats.asyncapi.v1.document) = {
+  servers: [{name: "hub", account: "SHOP", jetstream_domain: "hub"}]
+  auth: [
+    {scheme: "user", type: AUTH_TYPE_USER_PASSWORD},
+    {scheme: "token", type: AUTH_TYPE_TOKEN},
+    {scheme: "nkey", type: AUTH_TYPE_NKEY},
+    {scheme: "mtls", type: AUTH_TYPE_TLS},
+    {scheme: "callout", type: AUTH_TYPE_AUTH_CALLOUT}
+  ]
+  streams: [
+    {
+      name: "INVENTORY"
+      subjects: ["inventory.*.reserve"]
+      retention: RETENTION_WORK_QUEUE
+      storage: STORAGE_MEMORY
+      discard: DISCARD_NEW
+      discard_new_per_subject: true
+      max_msgs_per_subject: 1
+      max_bytes: "1GiB"
+      max_msg_size: "64KiB"
+      compression: COMPRESSION_S2
+      allow_atomic: true
+      allow_msg_schedules: true
+      allow_msg_counter: true
+      subject_delete_marker_ttl: "10m"
+      allow_msg_ttl: true
+      placement: {cluster: "eu", tags: ["ssd"]}
+      sources: [{name: "LEGACY", filter_subject: "legacy.>", domain: "edge"}]
+      republish: {src: ">", dest: "mirror.>", headers_only: true}
+      metadata: {key: "owner", value: "inventory"}
+    },
+    {name: "AUDIT", description: "Subjects are derived from the bound channels."}
+  ]
+  object_stores: [{bucket: "images", max_bytes: "10GB", storage: STORAGE_FILE, replicas: 3, compression: true}]
+};

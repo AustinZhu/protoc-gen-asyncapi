@@ -1,0 +1,28 @@
+syntax = "proto2";
+
+package legacy;
+
+import "asyncapi/v3/annotations.proto";
+
+// A proto2 service without annotations; included with include_all=true.
+service Legacy {
+  rpc Notify(Event) returns (Event);
+}
+
+// A legacy event.
+message Event {
+  required string id = 1;
+  optional int32 count = 2 [default = 7];
+  optional Level level = 3 [default = LEVEL_HIGH];
+  extensions 100 to max;
+
+  enum Level {
+    LEVEL_LOW = 0;
+    LEVEL_HIGH = 1;
+  }
+}
+
+message Unrelated {
+  option (asyncapi.v3.message) = {title: "unused"};
+  optional string x = 1;
+}

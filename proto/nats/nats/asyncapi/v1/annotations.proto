@@ -1,0 +1,469 @@
+// NATS annotations for protoc-gen-asyncapi (protoc-gen-nats-asyncapi).
+//
+// These annotations carry only NATS concepts: subjects, queue groups, NATS
+// micro, JetStream streams, consumers, key-value buckets and object stores,
+// and NATS specifics of servers and authentication. Everything generic
+// (info, servers, security schemes, tags, summaries, examples, headers, ...)
+// uses the asyncapi.v3 annotations (asyncapi/v3/annotations.proto).
+//
+// Every annotation is optional. A service only needs enough annotations to
+// say "this is a NATS API"; everything else is inferred from the Protobuf
+// schema and its comments:
+//
+//   - request/reply vs. publish vs. subscribe is inferred from the RPC shape,
+//   - subject parameters are bound to payload fields with the same name,
+//   - JetStream streams are matched to subjects automatically.
+//
+// Durations are strings in Go syntax with an additional "d" (day) unit, e.g.
+// "30s", "5m", "1h30m", "7d". Sizes are strings with an optional unit,
+// e.g. "512", "64KiB", "10MB", "1GiB".
+syntax = "proto3";
+
+package nats.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1;natsv1";
+
+extend google.protobuf.FileOptions {
+  // NATS specifics of the document: server and authentication details and
+  // JetStream assets (streams, key-value buckets, object stores).
+  Document document = 58310;
+}
+
+extend google.protobuf.ServiceOptions {
+  // NATS defaults applied to every method of the service.
+  Service service = 58310;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the NATS operation implemented by a method.
+  Operation operation = 58310;
+}
+
+extend google.protobuf.MessageOptions {
+  // Gives a message its own subject.
+  Message message = 58310;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the NATS specifics of a document. When several files are
+// merged into a single AsyncAPI document, the settings of all files (and of
+// the files they import) are combined.
+message Document {
+  // NATS details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 1;
+  // NATS authentication mechanism of security schemes declared in
+  // (asyncapi.v3.document).security_schemes.
+  repeated Auth auth = 2;
+  // JetStream streams used by the application.
+  repeated Stream streams = 3;
+  // JetStream key-value buckets used by the application.
+  repeated KeyValueBucket kv_buckets = 4;
+  // JetStream object stores used by the application.
+  repeated ObjectStore object_stores = 5;
+}
+
+// Server adds NATS details to an asyncapi.v3 server, emitted as the `x-nats`
+// server extension.
+message Server {
+  // Name of the asyncapi.v3 server.
+  string name = 1;
+  // NATS account the application binds to.
+  string account = 2;
+  // JetStream domain to use (for leaf node / hub topologies).
+  string jetstream_domain = 3;
+  // JetStream API prefix when using account imports, e.g. "$JS.hub.API".
+  string jetstream_api_prefix = 4;
+  // Whether the server requires TLS.
+  bool tls = 5;
+}
+
+// Auth tells which NATS mechanism an asyncapi.v3 security scheme uses. It is
+// emitted as the `x-nats-auth` extension and, when the scheme has no type,
+// determines it.
+message Auth {
+  // Name of the asyncapi.v3 security scheme.
+  string scheme = 1;
+  AuthType type = 2;
+}
+
+// AuthType lists the authentication mechanisms supported by NATS.
+enum AuthType {
+  AUTH_TYPE_UNSPECIFIED = 0;
+  // Username and password (AsyncAPI "userPassword").
+  AUTH_TYPE_USER_PASSWORD = 1;
+  // Plain token (AsyncAPI "apiKey" in the user position).
+  AUTH_TYPE_TOKEN = 2;
+  // NKey challenge/response (AsyncAPI "asymmetricEncryption").
+  AUTH_TYPE_NKEY = 3;
+  // Decentralised JWT with NKey signature, i.e. a ".creds" file
+  // (AsyncAPI "asymmetricEncryption").
+  AUTH_TYPE_JWT = 4;
+  // Mutual TLS with client certificates (AsyncAPI "X509").
+  AUTH_TYPE_TLS = 5;
+  // Authorization callout: credentials are forwarded to an external
+  // service (AsyncAPI "userPassword").
+  AUTH_TYPE_AUTH_CALLOUT = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+message Service {
+  // Prefix joined (with ".") in front of every method subject, e.g.
+  // "orders.v1". When a method has no subject the default is
+  // "<subject_prefix>.<method_name_in_snake_case>".
+  string subject_prefix = 1;
+  // Queue group used by methods that receive messages.
+  string queue_group = 2;
+  // JetStream stream used by the methods. See Operation.stream.
+  string stream = 3;
+  // Expose the service as a NATS micro service (github.com/nats-io/nats.go/micro).
+  Micro micro = 4;
+}
+
+// Micro describes a NATS micro service. Request/reply methods become micro
+// endpoints, the default queue group becomes "q", error headers are
+// documented and the $SRV.PING/INFO/STATS discovery endpoints are added.
+message Micro {
+  // Service name as registered with micro, e.g. "orders". Must match
+  // [A-Za-z0-9\-_]+.
+  string name = 1;
+  // Semantic version of the service, e.g. "1.2.0".
+  string version = 2;
+  string description = 3;
+  // Endpoint group, used as default subject prefix.
+  string group = 4;
+  // Service metadata.
+  map<string, string> metadata = 5;
+  // Disables the $SRV discovery endpoints.
+  bool no_discovery = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Method (operation) level
+// ---------------------------------------------------------------------------
+
+// Pattern tells how a method maps onto NATS messaging.
+//
+// When unspecified it is inferred from the method signature:
+//   rpc A(Req) returns (Res)                    -> REQUEST_REPLY
+//   rpc B(Event) returns (google.protobuf.Empty) -> SUBSCRIBE
+//   rpc C(Event) returns (stream ...)           -> PUBLISH (payload is the output)
+//   rpc D(stream Event) returns (...)           -> SUBSCRIBE
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service receives the request and replies with the response.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service publishes the message (the output for server streaming
+  // methods, otherwise the non-Empty of input/output, preferring the input).
+  PATTERN_PUBLISH = 2;
+  // The service subscribes to (or consumes) the input message.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes a NATS operation.
+message Operation {
+  // How the method maps onto NATS. Inferred when unspecified.
+  Pattern pattern = 1;
+  // NATS subject. Parameters are written as {name} and must span a whole
+  // token, e.g. "orders.{region}.{order_id}.created". NATS wildcards "*" and
+  // ">" are allowed. Joined to Service.subject_prefix.
+  string subject = 2;
+  // Key-value bucket: the channel becomes "$KV.<bucket>.<key>". `subject` is
+  // then the key (e.g. "users.{user_id}") and may be empty (">" = every key).
+  string kv_bucket = 3;
+  // Queue group for receiving operations. Overrides Service.queue_group.
+  string queue_group = 4;
+  // Static reply subject for REQUEST_REPLY operations. By default replies
+  // go to the dynamic inbox chosen by the requester.
+  string reply_subject = 5;
+  // Additional reply messages, e.g. an error type (full Protobuf name).
+  repeated string reply_messages = 6;
+  // JetStream stream the subject belongs to. Overrides Service.stream. When
+  // empty, the stream whose subjects match the operation subject is used.
+  string stream = 7;
+  // JetStream consumer used to receive the messages.
+  Consumer consumer = 8;
+  // JetStream publish behaviour.
+  Publish publish = 9;
+}
+
+// Publish describes how messages are published to JetStream.
+message Publish {
+  // Document the JetStream publish acknowledgement as reply of the
+  // operation. Enabled by default for JetStream subjects.
+  optional bool ack = 1;
+  // Messages carry a Nats-Msg-Id header used for de-duplication.
+  bool msg_id = 2;
+  // Optimistic concurrency headers set by the publisher.
+  repeated Expect expect = 3;
+  // Messages carry a Nats-TTL header (NATS 2.11+, requires allow_msg_ttl).
+  bool ttl = 4;
+  // Messages are published as part of an atomic batch (NATS 2.12+,
+  // requires allow_atomic).
+  bool atomic_batch = 5;
+  // Messages may be scheduled (NATS 2.12+, requires allow_msg_schedules).
+  bool schedule = 6;
+}
+
+// Expect lists JetStream optimistic concurrency checks.
+enum Expect {
+  EXPECT_UNSPECIFIED = 0;
+  // Nats-Expected-Stream
+  EXPECT_STREAM = 1;
+  // Nats-Expected-Last-Sequence
+  EXPECT_LAST_SEQUENCE = 2;
+  // Nats-Expected-Last-Subject-Sequence
+  EXPECT_LAST_SUBJECT_SEQUENCE = 3;
+  // Nats-Expected-Last-Msg-Id
+  EXPECT_LAST_MSG_ID = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message gives a Protobuf message its own subject. Operations without a
+// subject use it; messages with a subject that no operation uses still get a
+// channel.
+message Message {
+  // NATS subject, see Operation.subject (not joined to a prefix).
+  string subject = 1;
+  // Key-value bucket, see Operation.kv_bucket.
+  string kv_bucket = 2;
+}
+
+// ---------------------------------------------------------------------------
+// JetStream
+// ---------------------------------------------------------------------------
+
+// Stream mirrors the JetStream stream configuration.
+message Stream {
+  // Stream name, e.g. "ORDERS".
+  string name = 1;
+  string description = 2;
+  // Subjects captured by the stream. When empty, derived from the channels
+  // bound to the stream (parameters become "*").
+  repeated string subjects = 3;
+  Retention retention = 4;
+  Storage storage = 5;
+  int32 replicas = 6;
+  int32 max_consumers = 7;
+  int64 max_msgs = 8;
+  string max_bytes = 9;
+  string max_age = 10;
+  int64 max_msgs_per_subject = 11;
+  string max_msg_size = 12;
+  Discard discard = 13;
+  bool discard_new_per_subject = 14;
+  string duplicate_window = 15;
+  bool no_ack = 16;
+  bool allow_direct = 17;
+  bool mirror_direct = 18;
+  bool allow_rollup_hdrs = 19;
+  bool deny_delete = 20;
+  bool deny_purge = 21;
+  Compression compression = 22;
+  uint64 first_seq = 23;
+  Placement placement = 24;
+  StreamSource mirror = 25;
+  repeated StreamSource sources = 26;
+  Republish republish = 27;
+  SubjectTransform subject_transform = 28;
+  map<string, string> metadata = 29;
+  // NATS 2.11: per message TTL via the Nats-TTL header.
+  bool allow_msg_ttl = 30;
+  // NATS 2.11: TTL of delete markers left by max_age.
+  string subject_delete_marker_ttl = 31;
+  // NATS 2.12: atomic batch publishing.
+  bool allow_atomic = 32;
+  // NATS 2.12: distributed counters.
+  bool allow_msg_counter = 33;
+  // NATS 2.12: message scheduling.
+  bool allow_msg_schedules = 34;
+}
+
+enum Retention {
+  RETENTION_UNSPECIFIED = 0;
+  RETENTION_LIMITS = 1;
+  RETENTION_INTEREST = 2;
+  RETENTION_WORK_QUEUE = 3;
+}
+
+enum Storage {
+  STORAGE_UNSPECIFIED = 0;
+  STORAGE_FILE = 1;
+  STORAGE_MEMORY = 2;
+}
+
+enum Discard {
+  DISCARD_UNSPECIFIED = 0;
+  DISCARD_OLD = 1;
+  DISCARD_NEW = 2;
+}
+
+enum Compression {
+  COMPRESSION_UNSPECIFIED = 0;
+  COMPRESSION_NONE = 1;
+  COMPRESSION_S2 = 2;
+}
+
+message Placement {
+  string cluster = 1;
+  repeated string tags = 2;
+  // NATS 2.12: preferred leader.
+  string preferred = 3;
+}
+
+message StreamSource {
+  string name = 1;
+  uint64 opt_start_seq = 2;
+  // RFC 3339 timestamp.
+  string opt_start_time = 3;
+  string filter_subject = 4;
+  repeated SubjectTransform subject_transforms = 5;
+  // Cross-domain / cross-account access.
+  string external_api_prefix = 6;
+  string external_deliver_prefix = 7;
+  string domain = 8;
+}
+
+message SubjectTransform {
+  string src = 1;
+  string dest = 2;
+}
+
+message Republish {
+  string src = 1;
+  string dest = 2;
+  bool headers_only = 3;
+}
+
+// Consumer mirrors the JetStream consumer configuration.
+message Consumer {
+  // Durable name. When empty the consumer is ephemeral.
+  string durable = 1;
+  // Consumer name (when different from the durable name).
+  string name = 2;
+  string description = 3;
+  ConsumerKind kind = 4;
+  DeliverPolicy deliver_policy = 5;
+  uint64 opt_start_seq = 6;
+  // RFC 3339 timestamp.
+  string opt_start_time = 7;
+  AckPolicy ack_policy = 8;
+  string ack_wait = 9;
+  int32 max_deliver = 10;
+  repeated string backoff = 11;
+  // Subjects to filter on. Defaults to the operation subject (parameters
+  // become "*").
+  repeated string filter_subjects = 12;
+  ReplayPolicy replay_policy = 13;
+  uint64 rate_limit_bps = 14;
+  // Percentage of acknowledgements to sample, e.g. "100%".
+  string sample_freq = 15;
+  int32 max_waiting = 16;
+  int32 max_ack_pending = 17;
+  bool headers_only = 18;
+  int32 max_batch = 19;
+  string max_expires = 20;
+  string max_bytes = 21;
+  string inactive_threshold = 22;
+  int32 replicas = 23;
+  bool mem_storage = 24;
+  map<string, string> metadata = 25;
+  // Push consumers only.
+  string deliver_subject = 26;
+  string deliver_group = 27;
+  bool flow_control = 28;
+  string idle_heartbeat = 29;
+  // NATS 2.11: priority groups for pull consumers.
+  repeated string priority_groups = 30;
+  PriorityPolicy priority_policy = 31;
+  string priority_timeout = 32;
+  // NATS 2.11: pause the consumer until the given RFC 3339 timestamp.
+  string pause_until = 33;
+}
+
+enum ConsumerKind {
+  // Pull consumer (default, recommended).
+  CONSUMER_KIND_UNSPECIFIED = 0;
+  CONSUMER_KIND_PULL = 1;
+  CONSUMER_KIND_PUSH = 2;
+  // Ordered, ephemeral, flow-controlled consumer.
+  CONSUMER_KIND_ORDERED = 3;
+}
+
+enum DeliverPolicy {
+  DELIVER_POLICY_UNSPECIFIED = 0;
+  DELIVER_POLICY_ALL = 1;
+  DELIVER_POLICY_LAST = 2;
+  DELIVER_POLICY_NEW = 3;
+  DELIVER_POLICY_BY_START_SEQUENCE = 4;
+  DELIVER_POLICY_BY_START_TIME = 5;
+  DELIVER_POLICY_LAST_PER_SUBJECT = 6;
+}
+
+enum AckPolicy {
+  ACK_POLICY_UNSPECIFIED = 0;
+  ACK_POLICY_NONE = 1;
+  ACK_POLICY_ALL = 2;
+  ACK_POLICY_EXPLICIT = 3;
+}
+
+enum ReplayPolicy {
+  REPLAY_POLICY_UNSPECIFIED = 0;
+  REPLAY_POLICY_INSTANT = 1;
+  REPLAY_POLICY_ORIGINAL = 2;
+}
+
+enum PriorityPolicy {
+  PRIORITY_POLICY_UNSPECIFIED = 0;
+  PRIORITY_POLICY_NONE = 1;
+  PRIORITY_POLICY_OVERFLOW = 2;
+  PRIORITY_POLICY_PINNED_CLIENT = 3;
+  // NATS 2.12.
+  PRIORITY_POLICY_PRIORITIZED = 4;
+}
+
+// KeyValueBucket mirrors the JetStream key-value configuration.
+message KeyValueBucket {
+  // Bucket name, e.g. "profiles".
+  string bucket = 1;
+  string description = 2;
+  string max_value_size = 3;
+  // Number of historical values per key (1-64).
+  int32 history = 4;
+  string ttl = 5;
+  string max_bytes = 6;
+  Storage storage = 7;
+  int32 replicas = 8;
+  Placement placement = 9;
+  Republish republish = 10;
+  StreamSource mirror = 11;
+  repeated StreamSource sources = 12;
+  bool compression = 13;
+  // NATS 2.11: TTL of markers left by per-key TTL / limits.
+  string limit_marker_ttl = 14;
+  map<string, string> metadata = 15;
+}
+
+// ObjectStore mirrors the JetStream object store configuration.
+message ObjectStore {
+  // Bucket name, e.g. "images".
+  string bucket = 1;
+  string description = 2;
+  string ttl = 3;
+  string max_bytes = 4;
+  Storage storage = 5;
+  int32 replicas = 6;
+  Placement placement = 7;
+  bool compression = 8;
+  map<string, string> metadata = 9;
+}

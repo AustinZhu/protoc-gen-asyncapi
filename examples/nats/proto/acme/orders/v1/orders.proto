@@ -1,0 +1,223 @@
+// Order management for the ACME shop.
+//
+// Clients place orders with request/reply; order lifecycle events are
+// published to the ORDERS JetStream stream and consumed by the fulfilment
+// workers.
+syntax = "proto3";
+
+package acme.orders.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "nats/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Orders"
+    version: "1.4.0"
+    contact: {
+      name: "Orders team"
+      email: "orders@acme.example"
+    }
+    license: {
+      name: "Apache-2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  id: "urn:acme:orders"
+  servers: [
+    {
+      name: "production"
+      host: "nats.acme.example:4222"
+      protocol_version: "2.11"
+      description: "Production super-cluster."
+      security: ["creds"]
+    },
+    {
+      name: "local"
+      host: "localhost:4222"
+      description: "`nats-server -js` on your machine."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "creds"
+      description: "Decentralised JWT authentication with a `.creds` file."
+    }
+  ]
+};
+option (nats.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      tls: true
+    }
+  ]
+  auth: [
+    {
+      scheme: "creds"
+      type: AUTH_TYPE_JWT
+    }
+  ]
+  streams: [
+    {
+      name: "ORDERS"
+      description: "Order lifecycle events."
+      subjects: ["orders.events.>"]
+      storage: STORAGE_FILE
+      replicas: 3
+      max_age: "30d"
+      duplicate_window: "2m"
+      allow_msg_ttl: true
+    }
+  ]
+  kv_buckets: [
+    {
+      bucket: "carts"
+      description: "Shopping carts keyed by customer."
+      history: 5
+      ttl: "7d"
+    }
+  ]
+};
+
+// Orders exposes the order API as a NATS micro service.
+service OrderService {
+  option (nats.asyncapi.v1.service) = {
+    subject_prefix: "orders"
+    micro: {
+      name: "orders"
+      version: "1.4.0"
+    }
+  };
+
+  // Places a new order.
+  //
+  // The order is validated, persisted and an `OrderPlaced` event is
+  // published.
+  rpc PlaceOrder(PlaceOrderRequest) returns (Order) {
+    option (nats.asyncapi.v1.operation) = {subject: "place"};
+  }
+
+  // Looks up an order by ID.
+  rpc GetOrder(GetOrderRequest) returns (Order) {
+    option (nats.asyncapi.v1.operation) = {subject: "{order_id}.get"};
+  }
+}
+
+// OrderEvents are published by the order service.
+service OrderEvents {
+  // Emitted once an order has been placed.
+  rpc OrderPlaced(google.protobuf.Empty) returns (stream OrderPlacedEvent) {
+    option (nats.asyncapi.v1.operation) = {
+      publish: {
+        msg_id: true
+        ttl: true
+      }
+    };
+  }
+}
+
+// Fulfilment consumes order events.
+service Fulfilment {
+  option (nats.asyncapi.v1.service) = {queue_group: "fulfilment"};
+
+  // Ships placed orders.
+  rpc ShipOrder(OrderPlacedEvent) returns (google.protobuf.Empty) {
+    option (nats.asyncapi.v1.operation) = {
+      consumer: {
+        durable: "fulfilment"
+        ack_policy: ACK_POLICY_EXPLICIT
+        ack_wait: "30s"
+        max_deliver: 5
+        backoff: [
+          "1s",
+          "5s",
+          "30s"
+        ]
+      }
+    };
+  }
+
+  // Keeps carts up to date.
+  rpc UpdateCart(Cart) returns (google.protobuf.Empty) {
+    option (nats.asyncapi.v1.operation) = {
+      pattern: PATTERN_PUBLISH
+      kv_bucket: "carts"
+      subject: "{customer_id}"
+    };
+  }
+}
+
+// An order.
+message Order {
+  // Unique order ID.
+  string order_id = 1 [(asyncapi.v3.field) = {
+    examples: ["\"ord_123\""]
+  }];
+  // Customer that placed the order.
+  string customer_id = 2;
+  // Ordered items.
+  repeated LineItem items = 3;
+  // Current status.
+  Status status = 4;
+  // When the order was placed.
+  google.protobuf.Timestamp placed_at = 5;
+  // Total in cents.
+  int64 total_cents = 6;
+
+  // Lifecycle of an order.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // Awaiting payment.
+    STATUS_PENDING = 1;
+    // Paid and ready to ship.
+    STATUS_PAID = 2;
+    // Handed over to the carrier.
+    STATUS_SHIPPED = 3;
+  }
+}
+
+// A line of an order.
+message LineItem {
+  string sku = 1;
+  uint32 quantity = 2;
+}
+
+message PlaceOrderRequest {
+  string customer_id = 1 [(asyncapi.v3.field) = {required: true}];
+  repeated LineItem items = 2;
+  oneof payment {
+    string card_token = 3;
+    string voucher_code = 4;
+  }
+}
+
+message GetOrderRequest {
+  string order_id = 1 [(asyncapi.v3.field) = {required: true}];
+}
+
+// Published when an order has been placed.
+message OrderPlacedEvent {
+  option (nats.asyncapi.v1.message) = {subject: "orders.events.{order_id}.placed"};
+  option (asyncapi.v3.message) = {
+    channel: {title: "Order placed events"}
+    headers: [
+      {
+        name: "Trace-Id"
+        description: "W3C trace identifier."
+      }
+    ]
+  };
+
+  string order_id = 1 [(asyncapi.v3.field) = {correlation_id: true}];
+  Order order = 2;
+}
+
+// A shopping cart.
+message Cart {
+  string customer_id = 1;
+  repeated LineItem items = 2;
+  optional string coupon = 3;
+}

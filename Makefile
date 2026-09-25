@@ -10,7 +10,7 @@ build:
 	$(GO) build ./...
 
 install:
-	$(GO) install ./cmd/protoc-gen-temporal-asyncapi
+	$(GO) install ./cmd/...
 
 test:
 	$(GO) test ./...
@@ -21,7 +21,7 @@ lint:
 	$(BUF) lint
 	$(BUF) format --diff --exit-code
 
-# Regenerates the Go bindings of the options.
+# Regenerates the Go bindings of the annotations.
 generate:
 	$(BUF) generate
 
@@ -31,7 +31,7 @@ examples:
 
 # Updates the golden files of the tests.
 golden:
-	$(GO) test ./internal/generator -update
+	$(GO) test ./internal/... -update
 
 # Validates the golden and example documents with the official AsyncAPI
 # parser (needs Node.js).

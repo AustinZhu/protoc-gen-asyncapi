@@ -1,10 +1,12 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
-project_name: protoc-gen-temporal-asyncapi
+project_name: protoc-gen-asyncapi
 
 builds:
-  - main: ./cmd/protoc-gen-temporal-asyncapi
-    binary: protoc-gen-temporal-asyncapi
+  - &build
+    id: protoc-gen-asyncapi
+    main: ./cmd/protoc-gen-asyncapi
+    binary: protoc-gen-asyncapi
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
@@ -13,18 +15,37 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
+  - <<: *build
+    id: protoc-gen-nats-asyncapi
+    main: ./cmd/protoc-gen-nats-asyncapi
+    binary: protoc-gen-nats-asyncapi
+  - <<: *build
+    id: protoc-gen-temporal-asyncapi
+    main: ./cmd/protoc-gen-temporal-asyncapi
+    binary: protoc-gen-temporal-asyncapi
 
+# One archive per binary, named <binary>_<version>_<os>_<arch>, the naming
+# "fetch a binary from a GitHub release" installers (ubi, aqua, mise) expect.
 archives:
-  # protoc-gen-temporal-asyncapi_<version>_<os>_<arch>.tar.gz, the naming
-  # "fetch a binary from a GitHub release" installers (ubi, aqua, mise) expect.
-  - formats: [tar.gz]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - &archive
+    id: protoc-gen-asyncapi
+    ids: [protoc-gen-asyncapi]
+    formats: [tar.gz]
+    name_template: "protoc-gen-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         formats: [zip]
     files:
       - README.md
-      - proto/temporal/asyncapi/v1/options.proto
+      - proto/**/*.proto
+  - <<: *archive
+    id: protoc-gen-nats-asyncapi
+    ids: [protoc-gen-nats-asyncapi]
+    name_template: "protoc-gen-nats-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - <<: *archive
+    id: protoc-gen-temporal-asyncapi
+    ids: [protoc-gen-temporal-asyncapi]
+    name_template: "protoc-gen-temporal-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt

@@ -1,7 +1,8 @@
 // Validates AsyncAPI documents with the official parser (spec schema plus the
 // parser's built-in Spectral ruleset). Usage: node validate.mjs <file>...
-// With no arguments, validates every golden document under
-// ../../internal/generator/testdata/golden and the example documents.
+// With no arguments, validates every golden AsyncAPI document under
+// ../../internal/*/testdata/golden and the example documents (standalone
+// JSON Schema outputs, *.schema.json, are skipped).
 // Exits non-zero if any document has an error-severity diagnostic.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -15,16 +16,17 @@ function walk(dir) {
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (/\.(ya?ml|json)$/.test(name)) out.push(p);
+    else if (/\.(ya?ml|json)$/.test(name) && !name.endsWith('.schema.json')) out.push(p);
   }
   return out;
 }
 
 function defaultFiles() {
-  return [
-    ...walk(resolve(here, '../../internal/generator/testdata/golden')),
-    ...walk(resolve(here, '../../examples/asyncapi')),
-  ];
+  const internal = resolve(here, '../../internal');
+  const goldens = readdirSync(internal)
+    .map((pkg) => join(internal, pkg, 'testdata', 'golden'))
+    .filter((dir) => { try { return statSync(dir).isDirectory(); } catch { return false; } });
+  return [...goldens.flatMap(walk), ...walk(resolve(here, '../../examples/asyncapi'))];
 }
 
 const files = process.argv.length > 2 ? process.argv.slice(2) : defaultFiles();

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+// Inventory tracking.
+package inventory.v1;
+
+import "google/protobuf/empty.proto";
+import "asyncapi/v3/annotations.proto";
+import "nats/asyncapi/v1/annotations.proto";
+import "shared/v1/nats.proto";
+
+service InventoryService {
+  option (nats.asyncapi.v1.service) = {subject_prefix: "inventory"};
+  option (asyncapi.v3.service) = {
+    security: ["user"]
+    servers: ["hub"]
+  };
+
+  // Reserves stock.
+  rpc Reserve(Reservation) returns (google.protobuf.Empty) {
+    option (nats.asyncapi.v1.operation) = {
+      subject: "{warehouse}.reserve"
+      publish: {msg_id: true, expect: [EXPECT_LAST_SUBJECT_SEQUENCE, EXPECT_STREAM], atomic_batch: true, schedule: true}
+      consumer: {
+        kind: CONSUMER_KIND_PUSH
+        deliver_subject: "deliver.inventory"
+        deliver_policy: DELIVER_POLICY_BY_START_TIME
+        opt_start_time: "2025-01-01T00:00:00Z"
+        replay_policy: REPLAY_POLICY_ORIGINAL
+        flow_control: true
+        idle_heartbeat: "5s"
+      }
+    };
+  }
+
+  // Counts stock with the default subject.
+  rpc CountStock(Reservation) returns (StockLevel) {
+    option (nats.asyncapi.v1.operation) = {reply_messages: ["inventory.v1.Problem"]};
+    option (asyncapi.v3.operation) = {security: ["token"]};
+  }
+
+  rpc Audit(google.protobuf.Empty) returns (stream AuditEntry) {
+    option (nats.asyncapi.v1.operation) = {
+      stream: "AUDIT"
+      publish: {ack: false}
+    };
+  }
+
+  rpc Replay(AuditEntry) returns (google.protobuf.Empty) {
+    option (nats.asyncapi.v1.operation) = {
+      stream: "AUDIT"
+      consumer: {
+        kind: CONSUMER_KIND_PULL
+        durable: "replayer"
+        filter_subjects: ["audit.>", "inventory.audit"]
+        priority_groups: ["jobs"]
+        priority_policy: PRIORITY_POLICY_PINNED_CLIENT
+        priority_timeout: "2m"
+        max_waiting: 128
+        max_batch: 100
+        max_expires: "30s"
+        max_bytes: "1MiB"
+        inactive_threshold: "1h"
+        metadata: {key: "team", value: "ops"}
+      }
+    };
+  }
+
+  rpc Ignored(Reservation) returns (google.protobuf.Empty) {
+    option (asyncapi.v3.operation) = {skip: true};
+  }
+
+  // Static reply subject.
+  rpc Lookup(Reservation) returns (StockLevel) {
+    option (nats.asyncapi.v1.operation) = {
+      subject: "lookup.{warehouse}"
+      reply_subject: "inventory.lookup.replies"
+    };
+    option (asyncapi.v3.operation) = {
+      channel: {
+        id: "lookup"
+        title: "Lookups"
+        parameters: [{name: "warehouse", description: "Warehouse code.", enum: ["ams", "fra"], default: "ams"}]
+      }
+    };
+  }
+}
+
+message Reservation {
+  string warehouse = 1;
+  string sku = 2 [(asyncapi.v3.field) = {examples: ["\"sku-1\""]}];
+  int32 quantity = 3 [(asyncapi.v3.field) = {examples: ["2"]}];
+}
+
+message StockLevel {
+  int32 available = 1;
+}
+
+message Problem {
+  string message = 1;
+}
+
+message AuditEntry {
+  string text = 1;
+}
+
+// Emitted when stock runs low; not produced by an RPC.
+message LowStock {
+  option (nats.asyncapi.v1.message) = {subject: "inventory.alerts.low"};
+  option (asyncapi.v3.message) = {
+    channel: {servers: ["hub"]}
+    correlation_id: "$message.header#/Nats-Msg-Id"
+  };
+  string sku = 1;
+}
+
+// Entries of the "stock" key-value bucket.
+message StockEntry {
+  option (nats.asyncapi.v1.message) = {kv_bucket: "stock"};
+  int32 available = 1;
+}

@@ -1,25 +1,33 @@
-# Workspace: the temporal/asyncapi/v1 options module and the example that uses
-# it. Only the named `proto` module is published to the BSR (see
-# .github/workflows/release.yaml); the example module is intentionally unnamed.
+# Workspace: the three published annotation modules and the (unpublished)
+# examples. See .github/workflows/release.yaml for publishing.
 version: v2
 modules:
-  - path: proto
+  - path: proto/asyncapi
+    name: buf.build/austin-zhu/asyncapi
+  - path: proto/nats
+    name: buf.build/austin-zhu/nats-asyncapi
+  - path: proto/temporal
     name: buf.build/austin-zhu/temporal-asyncapi
-  - path: examples/proto
+  - path: examples/nats/proto
+  - path: examples/temporal/proto
 lint:
   use:
     - STANDARD
   ignore_only:
-    # Temporal payloads are named after their operation (…Input / …Result)
-    # and several operations take or return google.protobuf.Empty.
+    # Payloads are named after their operation (…Input / …Result, events)
+    # and many operations take or return google.protobuf.Empty.
     RPC_REQUEST_RESPONSE_UNIQUE:
-      - examples/proto/acme
+      - examples/nats/proto/acme
+      - examples/temporal/proto/acme
     RPC_REQUEST_STANDARD_NAME:
-      - examples/proto/acme
+      - examples/nats/proto/acme
+      - examples/temporal/proto/acme
     RPC_RESPONSE_STANDARD_NAME:
-      - examples/proto/acme
+      - examples/nats/proto/acme
+      - examples/temporal/proto/acme
     SERVICE_SUFFIX:
-      - examples/proto/acme
+      - examples/nats/proto/acme
+      - examples/temporal/proto/acme
 breaking:
   use:
     - FILE

@@ -1,0 +1,111 @@
+// Exercises the Protobuf to JSON Schema mapping.
+syntax = "proto3";
+
+package types.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "asyncapi/v3/annotations.proto";
+import "nats/asyncapi/v1/annotations.proto";
+
+service TypesService {
+  // Stores a document.
+  rpc Put(Document) returns (Ack) {
+    option (nats.asyncapi.v1.operation) = {subject: "types.{tenant}.put"};
+  }
+  // Watches tree changes.
+  rpc Watch(Tree) returns (Ack) {
+    option deprecated = true;
+    option (nats.asyncapi.v1.operation) = {
+      subject: "types.tree"
+      pattern: PATTERN_SUBSCRIBE
+      queue_group: "watchers"
+    };
+    option (asyncapi.v3.operation) = {
+      operation_id: "watchTree"
+      summary: "Tree watcher"
+      tags: [{name: "trees"}]
+    };
+  }
+}
+
+// A document with every kind of field.
+message Document {
+  option (asyncapi.v3.message) = {
+    title: "Document"
+    content_type: "application/vnd.acme+json"
+    examples: [{
+      name: "minimal"
+      summary: "A minimal document."
+      payload: "{\"tenant\": \"acme\", \"id\": \"8a4d7c1e-0000-4000-8000-000000000000\"}"
+      headers: {key: "Trace-Id", value: "abc"}
+    }]
+  };
+
+  // Tenant owning the document.
+  string tenant = 1 [(buf.validate.field).string = {min_len: 3, max_len: 32, pattern: "^[a-z]+$"}];
+  string id = 2 [(buf.validate.field).string.uuid = true, (buf.validate.field).required = true];
+  string email = 3 [(buf.validate.field).string.email = true];
+  int32 priority = 4 [(buf.validate.field).int32 = {gte: 0, lt: 10}];
+  int64 size = 5 [(buf.validate.field).int64 = {gt: 0}];
+  uint64 checksum = 6;
+  double score = 7 [(buf.validate.field).double = {gte: 0, lte: 1}];
+  float ratio = 8;
+  bool archived = 9 [deprecated = true];
+  bytes blob = 10;
+  repeated string labels = 11 [(buf.validate.field).repeated = {min_items: 1, max_items: 5, unique: true, items: {string: {max_len: 20}}}];
+  map<string, int32> counters = 12 [(buf.validate.field).map = {max_pairs: 10}];
+  map<int64, string> by_number = 13;
+  Kind kind = 14 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  optional string note = 15;
+  string owner = 16 [(google.api.field_behavior) = REQUIRED];
+  string secret = 17 [(asyncapi.v3.field) = {hidden: true}];
+  string website = 18 [(asyncapi.v3.field) = {format: "uri", examples: ["\"https://acme.example\""]}];
+
+  google.protobuf.Timestamp created_at = 20;
+  google.protobuf.Duration ttl = 21;
+  google.protobuf.Struct attributes = 22;
+  google.protobuf.Value extra = 23;
+  google.protobuf.ListValue list = 24;
+  google.protobuf.Any detail = 25;
+  google.protobuf.FieldMask mask = 26;
+  google.protobuf.StringValue nickname = 27;
+  google.protobuf.Int64Value version = 28;
+  google.protobuf.BoolValue flag = 29;
+  google.protobuf.BytesValue raw = 30;
+
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    string url = 40;
+    bytes inline = 41;
+  }
+  oneof target {
+    string path = 42;
+    Tree tree = 43;
+  }
+}
+
+// Kinds of documents.
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  // Plain text.
+  KIND_TEXT = 1;
+  KIND_BINARY = 2 [deprecated = true];
+}
+
+// A recursive structure.
+message Tree {
+  string name = 1;
+  repeated Tree children = 2;
+  map<string, Tree> named = 3;
+}
+
+message Ack {
+  bool ok = 1;
+}

@@ -1,0 +1,53 @@
+// Order processing that runs on Temporal and publishes events on NATS: both
+// protocols in one AsyncAPI document.
+syntax = "proto3";
+
+package mixed.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "nats/asyncapi/v1/annotations.proto";
+import "temporal/asyncapi/v1/options.proto";
+
+option (asyncapi.v3.document) = {
+  info: {title: "Orders", version: "1.0.0"}
+  servers: [
+    {name: "nats", host: "nats.example:4222", protocol: "nats"},
+    {name: "temporal", host: "temporal.example:7233", protocol: "temporal"}
+  ]
+};
+
+option (temporal.asyncapi.v1.document) = {
+  servers: [{name: "temporal", namespace: "orders"}]
+};
+
+// The order workflow.
+service OrderWorkflows {
+  option (temporal.asyncapi.v1.service) = {task_queue: "orders"};
+  option (asyncapi.v3.service) = {servers: ["temporal"]};
+
+  // Processes an order.
+  rpc ProcessOrder(Order) returns (OrderResult) {
+    option (temporal.asyncapi.v1.operation).workflow = {};
+  }
+}
+
+// Order events, published by the workflow's activities.
+service Events {
+  option (nats.asyncapi.v1.service) = {subject_prefix: "orders"};
+  option (asyncapi.v3.service) = {servers: ["nats"]};
+
+  // Published when an order completes.
+  rpc Completed(google.protobuf.Empty) returns (stream OrderResult) {
+    option (nats.asyncapi.v1.operation) = {subject: "{order_id}.completed"};
+  }
+}
+
+message Order {
+  string order_id = 1;
+}
+
+message OrderResult {
+  string order_id = 1;
+  bool ok = 2;
+}

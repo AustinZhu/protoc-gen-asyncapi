@@ -1,8 +1,10 @@
-# Regenerates the Go bindings of the options (`make generate`).
+# Regenerates the Go bindings of the annotations (`make generate`).
 version: v2
 inputs:
-  - directory: proto
+  - directory: proto/asyncapi
+  - directory: proto/nats
+  - directory: proto/temporal
 plugins:
   - local: protoc-gen-go
-    out: proto
-    opt: paths=source_relative
+    out: pb
+    opt: module=github.com/AustinZhu/protoc-gen-asyncapi/pb

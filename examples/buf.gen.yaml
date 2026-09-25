@@ -1,11 +1,9 @@
-# Generates the example AsyncAPI document (`make examples`), run from the
+# Generates the example AsyncAPI documents (`make examples`), run from the
 # repository root: buf generate --template examples/buf.gen.yaml
 version: v2
 inputs:
-  - directory: examples/proto
+  - directory: examples/nats/proto
+  - directory: examples/temporal/proto
 plugins:
-  - local: ["go", "run", "-buildvcs=false", "./cmd/protoc-gen-temporal-asyncapi"]
+  - local: ["go", "run", "-buildvcs=false", "./cmd/protoc-gen-asyncapi"]
     out: examples/asyncapi
-    opt:
-      - server_url=temporal.acme.internal:7233
-      - namespace=orders

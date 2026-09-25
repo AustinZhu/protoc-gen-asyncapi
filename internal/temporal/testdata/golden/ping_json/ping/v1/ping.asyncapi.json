@@ -1,0 +1,162 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Ping",
+    "version": "9.9.9",
+    "tags": [
+      {
+        "name": "Activities",
+        "description": "Activity types, scheduled by Workflows.",
+        "externalDocs": {
+          "url": "https://docs.temporal.io/activities"
+        }
+      },
+      {
+        "name": "Ping"
+      }
+    ]
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "activity.Ping": {
+      "address": "activity/Ping",
+      "messages": {
+        "ping.v1.PingInput": {
+          "$ref": "#/components/messages/ping.v1.PingInput"
+        }
+      },
+      "title": "Ping",
+      "description": "Input of the Ping activity.",
+      "bindings": {
+        "x-temporal": {
+          "kind": "activity",
+          "name": "Ping",
+          "bindingVersion": "0.1.0"
+        }
+      }
+    },
+    "activity.Ping.result": {
+      "address": "activity/Ping/result",
+      "messages": {
+        "ping.v1.Pong": {
+          "$ref": "#/components/messages/ping.v1.Pong"
+        }
+      },
+      "title": "Ping result",
+      "description": "Result of the Ping activity.",
+      "bindings": {
+        "x-temporal": {
+          "kind": "activity",
+          "name": "Ping",
+          "bindingVersion": "0.1.0"
+        }
+      }
+    }
+  },
+  "operations": {
+    "activity.Ping": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/activity.Ping"
+      },
+      "summary": "Execute the Ping activity.",
+      "tags": [
+        {
+          "name": "Ping"
+        },
+        {
+          "name": "Activities"
+        }
+      ],
+      "bindings": {
+        "x-temporal": {
+          "kind": "activity",
+          "name": "Ping",
+          "bindingVersion": "0.1.0"
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/activity.Ping/messages/ping.v1.PingInput"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/activity.Ping.result"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/activity.Ping.result/messages/ping.v1.Pong"
+          }
+        ]
+      },
+      "x-protobuf-method": "ping.v1.Ping.Ping"
+    }
+  },
+  "components": {
+    "schemas": {
+      "ping.v1.PingInput": {
+        "type": "object",
+        "properties": {
+          "ping_message": {
+            "type": "string"
+          }
+        }
+      },
+      "ping.v1.Pong": {
+        "type": "object",
+        "properties": {
+          "pong_message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "messages": {
+      "ping.v1.PingInput": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "encoding": {
+              "description": "Temporal payload encoding.",
+              "type": "string",
+              "const": "json/protobuf"
+            },
+            "messageType": {
+              "description": "Fully-qualified Protobuf message type.",
+              "type": "string",
+              "const": "ping.v1.PingInput"
+            }
+          }
+        },
+        "payload": {
+          "$ref": "#/components/schemas/ping.v1.PingInput"
+        },
+        "name": "PingInput",
+        "x-protobuf-message": "ping.v1.PingInput"
+      },
+      "ping.v1.Pong": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "encoding": {
+              "description": "Temporal payload encoding.",
+              "type": "string",
+              "const": "json/protobuf"
+            },
+            "messageType": {
+              "description": "Fully-qualified Protobuf message type.",
+              "type": "string",
+              "const": "ping.v1.Pong"
+            }
+          }
+        },
+        "payload": {
+          "$ref": "#/components/schemas/ping.v1.Pong"
+        },
+        "name": "Pong",
+        "x-protobuf-message": "ping.v1.Pong"
+      }
+    }
+  }
+}

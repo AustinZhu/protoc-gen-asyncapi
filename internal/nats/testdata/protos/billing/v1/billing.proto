@@ -1,0 +1,47 @@
+edition = "2023";
+
+option features.enum_type = CLOSED;
+
+package billing.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "nats/asyncapi/v1/annotations.proto";
+import "shared/v1/nats.proto";
+
+option (asyncapi.v3.document) = {
+  info: {title: "Billing", version: "2.0.0", summary: "Billing events."}
+  default_content_type: "application/protobuf"
+};
+
+option (nats.asyncapi.v1.document) = {
+  kv_buckets: [{bucket: "stock", history: 1, storage: STORAGE_MEMORY, max_value_size: "1KiB"}]
+};
+
+// Invoices.
+service BillingService {
+  // Issues an invoice.
+  rpc Issue(Invoice) returns (Invoice) {
+    option (nats.asyncapi.v1.operation) = {subject: "billing.issue"};
+  }
+}
+
+message Invoice {
+  string id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated Line lines = 2 [features.repeated_field_encoding = EXPANDED];
+  Currency currency = 3;
+  reserved 10 to 20;
+  reserved old_total;
+
+  message Line {
+    string text = 1;
+    int64 cents = 2;
+  }
+}
+
+enum Currency {
+  CURRENCY_UNSPECIFIED = 0;
+  CURRENCY_EUR = 1;
+  CURRENCY_EURO = 1;
+  option allow_alias = true;
+  reserved 5;
+}

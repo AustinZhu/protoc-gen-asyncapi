@@ -1,4 +1,4 @@
-module github.com/AustinZhu/protoc-gen-temporal-asyncapi
+module github.com/AustinZhu/protoc-gen-asyncapi
 
 go 1.24.7
 

@@ -19,8 +19,10 @@ concurrency:
 
 env:
   BUF_VERSION: "1.73.0"
-  # The only module published to the BSR: temporal/asyncapi/v1/options.proto.
-  BSR_MODULE_PATH: proto
+  # The modules published to the BSR (their names are in buf.yaml): the
+  # shared asyncapi.v3 annotations and each protocol's annotations. The
+  # example modules are never published.
+  BSR_MODULE_PATHS: proto/asyncapi proto/nats proto/temporal
 
 jobs:
   prepare:
@@ -59,7 +61,7 @@ jobs:
     uses: ./.github/workflows/ci.yaml
 
   buf-checks:
-    # Lint, breaking-change and publication-config checks for the BSR module.
+    # Lint, breaking-change and publication-config checks for the BSR modules.
     # Runs before anything is tagged or published, so a misconfigured release
     # fails closed without side effects.
     needs: prepare
@@ -74,7 +76,10 @@ jobs:
           version: ${{ env.BUF_VERSION }}
           setup_only: true
       - name: Lint
-        run: buf lint "$BSR_MODULE_PATH" --error-format github-actions
+        run: |
+          for path in $BSR_MODULE_PATHS; do
+            buf lint "$path" --error-format github-actions
+          done
       - name: Breaking changes against the previous release
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
@@ -88,32 +93,44 @@ jobs:
           # the major version is 0.
           IFS=. read -r pmaj pmin _ <<< "${prev#v}"
           IFS=. read -r nmaj nmin _ <<< "${TAG#v}"
+          breaking_allowed=false
           if [ "$nmaj" != "$pmaj" ] || { [ "$nmaj" = 0 ] && [ "$nmin" != "$pmin" ]; }; then
+            breaking_allowed=true
             echo "::notice::$TAG is a breaking release relative to $prev; reporting breaking changes without failing."
-            buf breaking "$BSR_MODULE_PATH" --against ".git#tag=${prev},subdir=${BSR_MODULE_PATH}" || true
-            exit 0
           fi
-          echo "Comparing $BSR_MODULE_PATH against $prev"
-          buf breaking "$BSR_MODULE_PATH" --against ".git#tag=${prev},subdir=${BSR_MODULE_PATH}" --error-format github-actions
+          for path in $BSR_MODULE_PATHS; do
+            if ! git cat-file -e "${prev}:${path}" 2>/dev/null; then
+              echo "::notice::$path did not exist at $prev; nothing to compare."
+              continue
+            fi
+            echo "Comparing $path against $prev"
+            if [ "$breaking_allowed" = true ]; then
+              buf breaking "$path" --against ".git#tag=${prev},subdir=${path}" || true
+            else
+              buf breaking "$path" --against ".git#tag=${prev},subdir=${path}" --error-format github-actions
+            fi
+          done
       - name: Verify BSR publication config
         env:
           # Only whether the secret is set; the value is never exposed to this job.
           HAS_BUF_TOKEN: ${{ secrets.BUF_TOKEN != '' }}
         run: |
-          name="$(buf config ls-modules --format json | jq -r --arg p "$BSR_MODULE_PATH" 'select(.path == $p) | .name // empty')"
-          if [ -z "$name" ]; then
-            echo "::error file=buf.yaml::The '$BSR_MODULE_PATH' module has no 'name' in buf.yaml, so the BSR module to publish to is unknown. Set it (e.g. name: buf.build/<owner>/<module>) before releasing."
-            exit 1
-          fi
-          if ! [[ "$name" =~ ^buf\.build/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$ ]]; then
-            echo "::error file=buf.yaml::BSR module name '$name' is not of the form buf.build/<owner>/<module>."
-            exit 1
-          fi
+          for path in $BSR_MODULE_PATHS; do
+            name="$(buf config ls-modules --format json | jq -r --arg p "$path" 'select(.path == $p) | .name // empty')"
+            if [ -z "$name" ]; then
+              echo "::error file=buf.yaml::The '$path' module has no 'name' in buf.yaml, so the BSR module to publish to is unknown. Set it (e.g. name: buf.build/<owner>/<module>) before releasing."
+              exit 1
+            fi
+            if ! [[ "$name" =~ ^buf\.build/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$ ]]; then
+              echo "::error file=buf.yaml::BSR module name '$name' is not of the form buf.build/<owner>/<module>."
+              exit 1
+            fi
+            echo "Will publish $path to $name"
+          done
           if [ "$HAS_BUF_TOKEN" != true ]; then
             echo "::error::The BUF_TOKEN Actions secret is not set; refusing to release without BSR credentials."
             exit 1
           fi
-          echo "Will publish $BSR_MODULE_PATH to $name"
 
   release:
     needs: [prepare, ci, buf-checks]
@@ -145,10 +162,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   bsr-publish:
-    # Publishes only the options module, only from this repository (never a
-    # fork), and only for the release tag validated above.
+    # Publishes only the annotation modules, only from this repository (never
+    # a fork), and only for the release tag validated above.
     needs: [prepare, release]
-    if: github.repository == 'AustinZhu/protoc-gen-temporal-asyncapi'
+    if: github.repository == 'AustinZhu/protoc-gen-asyncapi'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -171,10 +188,12 @@ jobs:
             echo "::error::The BUF_TOKEN Actions secret is not set."
             exit 1
           fi
-          name="$(buf config ls-modules --format json | jq -r --arg p "$BSR_MODULE_PATH" 'select(.path == $p) | .name // empty')"
-          if [ -z "$name" ]; then
-            echo "::error file=buf.yaml::The '$BSR_MODULE_PATH' module has no 'name' in buf.yaml."
-            exit 1
-          fi
-          echo "Publishing $BSR_MODULE_PATH to $name with label $TAG"
-          buf push "$BSR_MODULE_PATH" --label "$TAG" --source-control-url "$SOURCE_URL" --error-format github-actions
+          for path in $BSR_MODULE_PATHS; do
+            name="$(buf config ls-modules --format json | jq -r --arg p "$path" 'select(.path == $p) | .name // empty')"
+            if [ -z "$name" ]; then
+              echo "::error file=buf.yaml::The '$path' module has no 'name' in buf.yaml."
+              exit 1
+            fi
+            echo "Publishing $path to $name with label $TAG"
+            buf push "$path" --label "$TAG" --source-control-url "$SOURCE_URL" --error-format github-actions
+          done

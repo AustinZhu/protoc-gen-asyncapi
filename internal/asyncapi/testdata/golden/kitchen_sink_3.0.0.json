@@ -1,0 +1,767 @@
+{
+  "asyncapi": "3.0.0",
+  "id": "urn:example",
+  "info": {
+    "title": "Kitchen sink",
+    "version": "1.0.0",
+    "description": "Everything.",
+    "termsOfService": "https://example.com/tos",
+    "contact": {
+      "name": "Team",
+      "url": "https://example.com",
+      "email": "team@example.com",
+      "x-owner": "team-a"
+    },
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "x-owner": "team-a"
+    },
+    "tags": [
+      {
+        "name": "orders",
+        "description": "Orders",
+        "externalDocs": {
+          "description": "Docs",
+          "url": "https://example.com/docs",
+          "x-owner": "team-a"
+        },
+        "x-owner": "team-a"
+      }
+    ],
+    "externalDocs": {
+      "description": "Docs",
+      "url": "https://example.com/docs",
+      "x-owner": "team-a"
+    },
+    "x-owner": "team-a"
+  },
+  "servers": {
+    "prod": {
+      "host": "{env}.example.com:9092",
+      "protocol": "kafka",
+      "protocolVersion": "3.6",
+      "pathname": "/",
+      "title": "Prod",
+      "summary": "Prod.",
+      "description": "Production.",
+      "variables": {
+        "env": {
+          "enum": [
+            "prod"
+          ],
+          "default": "prod",
+          "description": "Env",
+          "examples": [
+            "prod"
+          ],
+          "x-owner": "team-a"
+        }
+      },
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/user"
+        },
+        {
+          "type": "X509"
+        }
+      ],
+      "tags": [
+        {
+          "name": "orders",
+          "description": "Orders",
+          "externalDocs": {
+            "description": "Docs",
+            "url": "https://example.com/docs",
+            "x-owner": "team-a"
+          },
+          "x-owner": "team-a"
+        }
+      ],
+      "externalDocs": {
+        "description": "Docs",
+        "url": "https://example.com/docs",
+        "x-owner": "team-a"
+      },
+      "bindings": {
+        "kafka": {
+          "schemaRegistryUrl": "https://r.example"
+        }
+      },
+      "x-owner": "team-a"
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "orders": {
+      "address": "orders.{region}",
+      "messages": {
+        "order": {
+          "headers": {
+            "type": "object",
+            "properties": {
+              "trace": {
+                "type": "string"
+              }
+            }
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "correlationId": {
+            "description": "id",
+            "location": "$message.payload#/id",
+            "x-owner": "team-a"
+          },
+          "contentType": "application/json",
+          "name": "Order",
+          "title": "Order",
+          "summary": "An order.",
+          "description": "Long.",
+          "tags": [
+            {
+              "name": "orders",
+              "description": "Orders",
+              "externalDocs": {
+                "description": "Docs",
+                "url": "https://example.com/docs",
+                "x-owner": "team-a"
+              },
+              "x-owner": "team-a"
+            },
+            {
+              "$ref": "#/components/tags/audit"
+            }
+          ],
+          "externalDocs": {
+            "description": "Docs",
+            "url": "https://example.com/docs",
+            "x-owner": "team-a"
+          },
+          "deprecated": true,
+          "bindings": {
+            "kafka": {
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          "examples": [
+            {
+              "name": "one",
+              "summary": "One",
+              "headers": {
+                "trace": "t"
+              },
+              "payload": {
+                "id": "a"
+              }
+            }
+          ],
+          "traits": [
+            {
+              "$ref": "#/components/messageTraits/common"
+            },
+            {
+              "name": "n",
+              "deprecated": true,
+              "bindings": {
+                "kafka": {
+                  "bindingVersion": "0.5.0"
+                },
+                "x-custom": {
+                  "a": 1
+                }
+              }
+            }
+          ],
+          "x-owner": "team-a"
+        },
+        "ref": {
+          "$ref": "#/components/messages/order"
+        }
+      },
+      "title": "Orders",
+      "summary": "Orders.",
+      "description": "All orders.",
+      "servers": [
+        {
+          "$ref": "#/servers/prod"
+        }
+      ],
+      "parameters": {
+        "region": {
+          "enum": [
+            "eu",
+            "us"
+          ],
+          "default": "eu",
+          "description": "Region",
+          "examples": [
+            "eu"
+          ],
+          "location": "$message.payload#/region",
+          "x-owner": "team-a"
+        }
+      },
+      "tags": [
+        {
+          "name": "orders",
+          "description": "Orders",
+          "externalDocs": {
+            "description": "Docs",
+            "url": "https://example.com/docs",
+            "x-owner": "team-a"
+          },
+          "x-owner": "team-a"
+        }
+      ],
+      "externalDocs": {
+        "description": "Docs",
+        "url": "https://example.com/docs",
+        "x-owner": "team-a"
+      },
+      "bindings": {
+        "kafka": {
+          "topic": "orders"
+        }
+      },
+      "x-owner": "team-a"
+    },
+    "replies": {
+      "address": null,
+      "messages": {
+        "order": {
+          "$ref": "#/components/messages/order"
+        }
+      }
+    }
+  },
+  "operations": {
+    "sendOrder": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/orders"
+      },
+      "title": "Send",
+      "summary": "Send.",
+      "description": "Send an order.",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth"
+        }
+      ],
+      "tags": [
+        {
+          "name": "orders",
+          "description": "Orders",
+          "externalDocs": {
+            "description": "Docs",
+            "url": "https://example.com/docs",
+            "x-owner": "team-a"
+          },
+          "x-owner": "team-a"
+        }
+      ],
+      "externalDocs": {
+        "description": "Docs",
+        "url": "https://example.com/docs",
+        "x-owner": "team-a"
+      },
+      "bindings": {
+        "nats": {
+          "bindingVersion": "0.1.0",
+          "queue": "q"
+        }
+      },
+      "traits": [
+        {
+          "$ref": "#/components/operationTraits/common"
+        },
+        {
+          "title": "T",
+          "summary": "S",
+          "description": "D",
+          "tags": [
+            {
+              "name": "orders",
+              "description": "Orders",
+              "externalDocs": {
+                "description": "Docs",
+                "url": "https://example.com/docs",
+                "x-owner": "team-a"
+              },
+              "x-owner": "team-a"
+            }
+          ],
+          "externalDocs": {
+            "description": "Docs",
+            "url": "https://example.com/docs",
+            "x-owner": "team-a"
+          },
+          "bindings": {
+            "nats": {
+              "bindingVersion": "0.1.0",
+              "queue": "q"
+            }
+          },
+          "x-owner": "team-a"
+        }
+      ],
+      "messages": [
+        {
+          "$ref": "#/channels/orders/messages/order"
+        }
+      ],
+      "reply": {
+        "address": {
+          "description": "Inbox",
+          "location": "$message.header#/replyTo",
+          "x-owner": "team-a"
+        },
+        "channel": {
+          "$ref": "#/channels/replies"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/replies/messages/order"
+          }
+        ],
+        "x-owner": "team-a"
+      },
+      "x-owner": "team-a"
+    }
+  },
+  "components": {
+    "schemas": {
+      "Order": {
+        "$id": "urn:order",
+        "$comment": "c",
+        "title": "Order",
+        "description": "An order.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z]",
+            "readOnly": true,
+            "examples": [
+              "a"
+            ]
+          },
+          "qty": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "default": 1,
+            "multipleOf": 1,
+            "minimum": 0,
+            "exclusiveMaximum": 100
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "contains": {
+              "const": "x"
+            },
+            "minItems": 0,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "tuple": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string"
+              }
+            ],
+            "additionalItems": false
+          },
+          "meta": {
+            "type": "object",
+            "patternProperties": {
+              "^x-": {}
+            },
+            "propertyNames": {
+              "pattern": "^[a-z]+$"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "minProperties": 0,
+            "maxProperties": 5
+          },
+          "kind": {
+            "contentMediaType": "text/plain",
+            "contentEncoding": "base64",
+            "enum": [
+              "a",
+              "b"
+            ],
+            "writeOnly": true,
+            "deprecated": true
+          },
+          "ref": {
+            "$ref": "#/components/schemas/Other"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "dependencies": {
+          "meta": [
+            "id"
+          ]
+        },
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ]
+          }
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "required": [
+              "qty"
+            ]
+          }
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "kind"
+              ]
+            }
+          }
+        ],
+        "if": {
+          "required": [
+            "kind"
+          ]
+        },
+        "then": {
+          "required": [
+            "id"
+          ]
+        },
+        "else": {},
+        "definitions": {
+          "inner": {
+            "type": "string"
+          }
+        },
+        "discriminator": "kind",
+        "externalDocs": {
+          "description": "Docs",
+          "url": "https://example.com/docs",
+          "x-owner": "team-a"
+        },
+        "x-protobuf-message": "acme.v1.Order"
+      },
+      "Other": {
+        "type": "null"
+      }
+    },
+    "servers": {
+      "staging": {
+        "host": "staging.example.com",
+        "protocol": "kafka"
+      },
+      "ref": {
+        "$ref": "#/servers/prod"
+      }
+    },
+    "channels": {
+      "dlq": {
+        "address": "orders.dlq"
+      },
+      "ref": {
+        "$ref": "#/channels/orders"
+      }
+    },
+    "operations": {
+      "receiveDlq": {
+        "action": "receive",
+        "channel": {
+          "$ref": "#/channels/orders"
+        }
+      }
+    },
+    "messages": {
+      "order": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "trace": {
+              "type": "string"
+            }
+          }
+        },
+        "payload": {
+          "$ref": "#/components/schemas/Order"
+        },
+        "correlationId": {
+          "description": "id",
+          "location": "$message.payload#/id",
+          "x-owner": "team-a"
+        },
+        "contentType": "application/json",
+        "name": "Order",
+        "title": "Order",
+        "summary": "An order.",
+        "description": "Long.",
+        "tags": [
+          {
+            "name": "orders",
+            "description": "Orders",
+            "externalDocs": {
+              "description": "Docs",
+              "url": "https://example.com/docs",
+              "x-owner": "team-a"
+            },
+            "x-owner": "team-a"
+          },
+          {
+            "$ref": "#/components/tags/audit"
+          }
+        ],
+        "externalDocs": {
+          "description": "Docs",
+          "url": "https://example.com/docs",
+          "x-owner": "team-a"
+        },
+        "deprecated": true,
+        "bindings": {
+          "kafka": {
+            "key": {
+              "type": "string"
+            }
+          }
+        },
+        "examples": [
+          {
+            "name": "one",
+            "summary": "One",
+            "headers": {
+              "trace": "t"
+            },
+            "payload": {
+              "id": "a"
+            }
+          }
+        ],
+        "traits": [
+          {
+            "$ref": "#/components/messageTraits/common"
+          },
+          {
+            "name": "n",
+            "deprecated": true,
+            "bindings": {
+              "kafka": {
+                "bindingVersion": "0.5.0"
+              },
+              "x-custom": {
+                "a": 1
+              }
+            }
+          }
+        ],
+        "x-owner": "team-a"
+      },
+      "proto": {
+        "payload": {
+          "schemaFormat": "application/vnd.google.protobuf;version=3",
+          "schema": "message Order { string id = 1; }"
+        }
+      }
+    },
+    "securitySchemes": {
+      "user": {
+        "type": "userPassword",
+        "description": "creds",
+        "x-owner": "team-a"
+      },
+      "apikey": {
+        "type": "apiKey",
+        "in": "user"
+      },
+      "httpkey": {
+        "type": "httpApiKey",
+        "name": "X-Key",
+        "in": "header"
+      },
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "implicit": {
+            "authorizationUrl": "https://a.example/auth",
+            "availableScopes": {
+              "read": "Read access"
+            }
+          },
+          "password": {
+            "tokenUrl": "https://a.example/token",
+            "availableScopes": {
+              "read": "Read"
+            }
+          },
+          "clientCredentials": {
+            "tokenUrl": "https://a.example/token",
+            "refreshUrl": "https://a.example/refresh",
+            "availableScopes": {
+              "read": "Read"
+            }
+          },
+          "authorizationCode": {
+            "authorizationUrl": "https://a.example/auth",
+            "tokenUrl": "https://a.example/token",
+            "availableScopes": {
+              "read": "Read"
+            },
+            "x-owner": "team-a"
+          }
+        },
+        "scopes": [
+          "read"
+        ]
+      },
+      "oidc": {
+        "type": "openIdConnect",
+        "openIdConnectUrl": "https://a.example/.well-known",
+        "scopes": [
+          "read"
+        ]
+      },
+      "x509": {
+        "type": "X509"
+      },
+      "symmetricencryption": {
+        "type": "symmetricEncryption"
+      },
+      "asymmetricencryption": {
+        "type": "asymmetricEncryption"
+      },
+      "plain": {
+        "type": "plain"
+      },
+      "scramsha256": {
+        "type": "scramSha256"
+      },
+      "scramsha512": {
+        "type": "scramSha512"
+      },
+      "gssapi": {
+        "type": "gssapi"
+      }
+    },
+    "serverVariables": {
+      "env": {
+        "default": "prod"
+      }
+    },
+    "parameters": {
+      "region": {
+        "description": "Region"
+      }
+    },
+    "correlationIds": {
+      "byId": {
+        "location": "$message.payload#/id"
+      }
+    },
+    "replies": {
+      "inbox": {
+        "address": {
+          "$ref": "#/components/replyAddresses/inbox"
+        }
+      }
+    },
+    "replyAddresses": {
+      "inbox": {
+        "location": "$message.header#/replyTo"
+      }
+    },
+    "externalDocs": {
+      "docs": {
+        "description": "Docs",
+        "url": "https://example.com/docs",
+        "x-owner": "team-a"
+      }
+    },
+    "tags": {
+      "audit": {
+        "name": "audit"
+      }
+    },
+    "operationTraits": {
+      "common": {
+        "summary": "Common"
+      },
+      "ref": {
+        "$ref": "#/components/operationTraits/common"
+      }
+    },
+    "messageTraits": {
+      "common": {
+        "headers": {
+          "type": "object"
+        },
+        "correlationId": {
+          "$ref": "#/components/correlationIds/byId"
+        },
+        "contentType": "application/json",
+        "examples": [
+          {
+            "payload": {}
+          }
+        ]
+      }
+    },
+    "serverBindings": {
+      "kafka": {
+        "kafka": {}
+      }
+    },
+    "channelBindings": {
+      "kafka": {
+        "kafka": {}
+      }
+    },
+    "operationBindings": {
+      "kafka": {
+        "kafka": {}
+      }
+    },
+    "messageBindings": {
+      "kafka": {
+        "kafka": {}
+      }
+    },
+    "x-owner": "team-a"
+  },
+  "x-owner": "team-a"
+}
