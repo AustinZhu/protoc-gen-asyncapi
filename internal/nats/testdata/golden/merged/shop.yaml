@@ -8,7 +8,7 @@ info:
     - name: InventoryService
     - name: BillingService
       description: Invoices.
-    - name: Legacy
+    - name: Plain
       description: A proto2 service without annotations; included with include_all=true.
 servers:
   hub:
@@ -108,17 +108,17 @@ channels:
       billing.v1.Invoice:
         $ref: '#/components/messages/billing.v1.Invoice'
     description: Replies to requests sent on `billing.issue`. NATS delivers them to the reply subject (usually a unique `_INBOX` subject) chosen by the requester.
-  legacy.legacy.notify:
-    address: legacy.legacy.notify
+  plain.plain.notify:
+    address: plain.plain.notify
     messages:
-      legacy.Event:
-        $ref: '#/components/messages/legacy.Event'
-  legacy.legacy.notify.reply:
+      plain.Event:
+        $ref: '#/components/messages/plain.Event'
+  plain.plain.notify.reply:
     address: null
     messages:
-      legacy.Event:
-        $ref: '#/components/messages/legacy.Event'
-    description: Replies to requests sent on `legacy.legacy.notify`. NATS delivers them to the reply subject (usually a unique `_INBOX` subject) chosen by the requester.
+      plain.Event:
+        $ref: '#/components/messages/plain.Event'
+    description: Replies to requests sent on `plain.plain.notify`. NATS delivers them to the reply subject (usually a unique `_INBOX` subject) chosen by the requester.
   inventory.alerts.low:
     address: inventory.alerts.low
     messages:
@@ -249,20 +249,20 @@ operations:
       messages:
         - $ref: '#/channels/billing.issue.reply/messages/billing.v1.Invoice'
     x-protobuf-method: billing.v1.BillingService.Issue
-  Legacy.Notify:
+  Plain.Notify:
     action: receive
     channel:
-      $ref: '#/channels/legacy.legacy.notify'
+      $ref: '#/channels/plain.plain.notify'
     tags:
-      - name: Legacy
+      - name: Plain
     messages:
-      - $ref: '#/channels/legacy.legacy.notify/messages/legacy.Event'
+      - $ref: '#/channels/plain.plain.notify/messages/plain.Event'
     reply:
       channel:
-        $ref: '#/channels/legacy.legacy.notify.reply'
+        $ref: '#/channels/plain.plain.notify.reply'
       messages:
-        - $ref: '#/channels/legacy.legacy.notify.reply/messages/legacy.Event'
-    x-protobuf-method: legacy.Legacy.Notify
+        - $ref: '#/channels/plain.plain.notify.reply/messages/plain.Event'
+    x-protobuf-method: plain.Plain.Notify
 components:
   schemas:
     inventory.v1.Reservation:
@@ -323,8 +323,8 @@ components:
         - CURRENCY_UNSPECIFIED
         - CURRENCY_EUR
         - CURRENCY_EURO
-    legacy.Event:
-      description: A legacy event.
+    plain.Event:
+      description: A proto2 event.
       type: object
       properties:
         id:
@@ -333,10 +333,10 @@ components:
           type: integer
           format: int32
         level:
-          $ref: '#/components/schemas/legacy.Event.Level'
+          $ref: '#/components/schemas/plain.Event.Level'
       required:
         - id
-    legacy.Event.Level:
+    plain.Event.Level:
       type: string
       enum:
         - LEVEL_LOW
@@ -354,6 +354,11 @@ components:
         available:
           type: integer
           format: int32
+    plain.Unrelated:
+      type: object
+      properties:
+        x:
+          type: string
   messages:
     inventory.v1.Reservation:
       headers:
@@ -411,12 +416,12 @@ components:
         $ref: '#/components/schemas/billing.v1.Invoice'
       name: Invoice
       x-protobuf-message: billing.v1.Invoice
-    legacy.Event:
+    plain.Event:
       payload:
-        $ref: '#/components/schemas/legacy.Event'
+        $ref: '#/components/schemas/plain.Event'
       name: Event
-      summary: A legacy event.
-      x-protobuf-message: legacy.Event
+      summary: A proto2 event.
+      x-protobuf-message: plain.Event
     inventory.v1.LowStock:
       payload:
         $ref: '#/components/schemas/inventory.v1.LowStock'
@@ -465,8 +470,8 @@ x-nats-jetstream:
         tags:
           - ssd
       sources:
-        - name: LEGACY
-          filter_subject: legacy.>
+        - name: ARCHIVE
+          filter_subject: archive.>
           external:
             api: $JS.edge.API
       compression: s2

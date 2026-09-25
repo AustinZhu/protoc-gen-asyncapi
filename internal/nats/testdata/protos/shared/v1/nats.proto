@@ -49,7 +49,7 @@ option (nats.asyncapi.v1.document) = {
       subject_delete_marker_ttl: "10m"
       allow_msg_ttl: true
       placement: {cluster: "eu", tags: ["ssd"]}
-      sources: [{name: "LEGACY", filter_subject: "legacy.>", domain: "edge"}]
+      sources: [{name: "ARCHIVE", filter_subject: "archive.>", domain: "edge"}]
       republish: {src: ">", dest: "mirror.>", headers_only: true}
       metadata: {key: "owner", value: "inventory"}
     },

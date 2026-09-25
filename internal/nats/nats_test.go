@@ -36,10 +36,10 @@ func TestGolden(t *testing.T) {
 		{"inventory", "", []string{"inventory/v1/inventory.proto"}},
 		{"inventory_client", "perspective=client", []string{"inventory/v1/inventory.proto"}},
 		{"merged", "merge=true,merge_file_name=shop,include_all=true", []string{
-			"inventory/v1/inventory.proto", "billing/v1/billing.proto", "legacy/legacy.proto",
+			"inventory/v1/inventory.proto", "billing/v1/billing.proto", "plain/plain.proto",
 		}},
-		{"per_file", "include_all=true", []string{"billing/v1/billing.proto", "legacy/legacy.proto", "shared/v1/nats.proto"}},
-		{"protobuf_printer", "payload=protobuf,include_all=true", []string{"billing/v1/billing.proto", "legacy/legacy.proto", "types/v1/types.proto"}},
+		{"per_file", "include_all=true", []string{"billing/v1/billing.proto", "plain/plain.proto", "shared/v1/nats.proto"}},
+		{"protobuf_printer", "payload=protobuf,include_all=true", []string{"billing/v1/billing.proto", "plain/plain.proto", "types/v1/types.proto"}},
 		{"services_filter", "include_all=true,services=inventory.**", []string{"inventory/v1/inventory.proto", "billing/v1/billing.proto"}},
 	}
 	for _, tc := range cases {

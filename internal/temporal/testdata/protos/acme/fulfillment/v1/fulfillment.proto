@@ -50,7 +50,7 @@ message ProcessOrderInput {
   uint32 attempt = 12;
   bytes signature = 13;
   map<int32, LineItem> items_by_position = 14;
-  string legacy_ref = 15 [deprecated = true];
+  string external_ref = 15 [deprecated = true];
 }
 
 message Customer {

@@ -22,6 +22,8 @@ type validateRules struct {
 	fieldExt protoreflect.ExtensionType
 	oneofExt protoreflect.ExtensionType
 	types    *protoregistry.Types
+	// disabled turns every lookup off (protovalidate=false).
+	disabled bool
 }
 
 func newValidateRules(plugin *protogen.Plugin) *validateRules {
@@ -53,7 +55,7 @@ func newValidateRules(plugin *protogen.Plugin) *validateRules {
 
 // lookup returns the message value of the extension named name in opts.
 func (v *validateRules) lookup(opts proto.Message, xt protoreflect.ExtensionType, name protoreflect.FullName) protoreflect.Message {
-	if opts == nil {
+	if opts == nil || v.disabled {
 		return nil
 	}
 	var found protoreflect.Message

@@ -30,6 +30,8 @@ func TestGolden(t *testing.T) {
 		{"payments", "", []string{"acme/payments/v1/payments.proto"}},
 		{"cart", "", []string{"acme/cart/v1/cart.proto"}},
 		{"signup", "", []string{"acme/signup/v1/signup.proto"}},
+		{"signup_trimmed", "trim_unused_schemas=true,protovalidate=false", []string{"acme/signup/v1/signup.proto"}},
+		{"ping_options", "title=Ping API,description=Pings a worker.,id=urn:acme:ping,server_url=https://temporal.acme.example:7233,namespace=pings,perspective=worker,enums_as_ints=true", []string{"ping/v1/ping.proto"}},
 		{"ping_json", "format=json,asyncapi_version=3.0.0,json_names=false,version=9.9.9", []string{"ping/v1/ping.proto"}},
 		{"ping_protobuf", "payload=protobuf", []string{"ping/v1/ping.proto"}},
 		{"per_file", "", []string{"acme/billing/v1/billing.proto", "acme/shipping/v1/shipping.proto"}},
@@ -63,6 +65,7 @@ func TestErrors(t *testing.T) {
 		}, "\n")},
 		{"unknown temporal server", "", []string{"bad_server.proto"}, `temporal server "nope" is not declared`},
 		{"invalid option value", "format=xml", []string{"ping/v1/ping.proto"}, `invalid value "xml" for option "format"`},
+		{"server_url without host", "server_url=https://", []string{"ping/v1/ping.proto"}, `server_url "https://" has no host`},
 		{"unknown option", "colour=blue", []string{"ping/v1/ping.proto"}, `unknown option "colour"`},
 	}
 	sources := map[string]string{"bad_server.proto": `syntax = "proto3"; package b; import "temporal/asyncapi/v1/options.proto";

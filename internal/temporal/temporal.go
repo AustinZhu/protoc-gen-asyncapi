@@ -5,7 +5,9 @@ package temporal
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -33,6 +35,8 @@ type Protocol struct {
 	ops map[protoreflect.FullName]*Operation
 	// grouped are workflow names that have handlers linked to them.
 	grouped map[string]bool
+	// serverURL and namespace are the server_url and namespace options.
+	serverURL, namespace string
 }
 
 // New returns the Temporal protocol.
@@ -46,7 +50,35 @@ var Plugin = core.Plugin{
 
 func (p *Protocol) Name() string { return "temporal" }
 
-func (p *Protocol) Options() []core.Option { return nil }
+func (p *Protocol) Options() []core.Option {
+	str := func(dst *string) func(string) error { return func(v string) error { *dst = v; return nil } }
+	return []core.Option{
+		{Name: "server_url", Usage: "Temporal frontend address (host:port or URL); adds a server named temporal", Set: str(&p.serverURL)},
+		{Name: "namespace", Usage: "default Temporal namespace of the document's Temporal servers", Set: str(&p.namespace)},
+	}
+}
+
+// ServerName is the name of the server added by the server_url option.
+const ServerName = "temporal"
+
+// optionServer returns the server described by the server_url option.
+func optionServer(raw string) (*asyncapi.Server, error) {
+	srv := &asyncapi.Server{Protocol: "temporal", Host: raw, Description: "Temporal Frontend Service."}
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("server_url: %w", err)
+		}
+		if u.Host == "" {
+			return nil, fmt.Errorf("server_url %q has no host", raw)
+		}
+		srv.Host = u.Host
+		if u.Path != "" && u.Path != "/" {
+			srv.Pathname = u.Path
+		}
+	}
+	return srv, nil
+}
 
 // Claims documents services with Temporal annotations.
 func (p *Protocol) Claims(_ *core.Builder, s *protogen.Service) bool {
@@ -70,6 +102,19 @@ func documentOptions(f *protogen.File) *temporalv1.Document {
 // Begin adds namespaces to servers and discovers every claimed service, so
 // all annotation problems of a document are reported at once.
 func (p *Protocol) Begin(b *core.Builder) error {
+	if p.serverURL != "" {
+		if _, ok := b.Doc.Servers.Get(ServerName); ok {
+			return fmt.Errorf("server_url: a server named %q is already declared", ServerName)
+		}
+		srv, err := optionServer(p.serverURL)
+		if err != nil {
+			return err
+		}
+		if b.Doc.Servers == nil {
+			b.Doc.Servers = asyncapi.NewMap[*asyncapi.Server]()
+		}
+		b.Doc.Servers.Set(ServerName, srv)
+	}
 	for _, f := range b.Imports() {
 		for _, srv := range documentOptions(f).GetServers() {
 			out, ok := b.Doc.Servers.Get(srv.GetName())
@@ -81,6 +126,20 @@ func (p *Protocol) Begin(b *core.Builder) error {
 					out.Extensions = asyncapi.Extensions{}
 				}
 				out.Extensions["x-temporal-namespace"] = srv.GetNamespace()
+			}
+		}
+	}
+	if p.namespace != "" && b.Doc.Servers != nil {
+		for _, name := range b.Doc.Servers.Keys() {
+			out, _ := b.Doc.Servers.Get(name)
+			if out.Protocol != "temporal" {
+				continue
+			}
+			if _, ok := out.Extensions["x-temporal-namespace"]; !ok {
+				if out.Extensions == nil {
+					out.Extensions = asyncapi.Extensions{}
+				}
+				out.Extensions["x-temporal-namespace"] = p.namespace
 			}
 		}
 	}

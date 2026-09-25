@@ -36,8 +36,9 @@ type Params struct {
 	Payload string
 	// AsyncAPI version: "3.1.0" (default) or "3.0.0".
 	AsyncAPIVersion string
-	// Overrides info.version.
-	Version string
+	// Override info.title, info.version, info.description and the
+	// document id.
+	Title, Version, Description, ID string
 	// Overrides the default content type of messages.
 	ContentType string
 	// Use JSON (lowerCamelCase) field names in schemas (default true).
@@ -46,6 +47,11 @@ type Params struct {
 	EnumValues string
 	// Annotate field schemas with their Protobuf type (x-protobuf-type).
 	ProtoTypes bool
+	// Emit only the schemas reachable from an operation instead of every
+	// message and enum of the documented files.
+	TrimUnusedSchemas bool
+	// Translate buf.validate constraints (default true).
+	Protovalidate bool
 	// Fully-qualified service name globs to document; empty means all.
 	// "*" matches one name segment and "**" any number.
 	Services []string
@@ -69,6 +75,7 @@ func DefaultParams() *Params {
 		AsyncAPIVersion: asyncapi.DefaultVersion,
 		JSONNames:       true,
 		EnumValues:      EnumNames,
+		Protovalidate:   true,
 	}
 }
 
@@ -113,13 +120,35 @@ func (p *Params) Options() []Option {
 			p.MergeFileName = v
 			return nil
 		}},
-		{"perspective", "server|client", choice("perspective", &p.Perspective, "server", "client")},
+		{"perspective", "server|client (worker is an alias of server)", func(v string) error {
+			if v == "worker" {
+				v = "server"
+			}
+			p.Perspective = v
+			return oneOf("perspective", v, "server", "client")
+		}},
 		{"payload", "jsonschema|protobuf", choice("payload", &p.Payload, "jsonschema", "protobuf")},
 		{"asyncapi_version", strings.Join(asyncapi.Versions, "|"), choice("asyncapi_version", &p.AsyncAPIVersion, asyncapi.Versions...)},
-		{"version", "info.version", str(&p.Version)},
+		{"title", "info.title (default: the service or proto package)", str(&p.Title)},
+		{"version", "info.version (default 0.0.0)", str(&p.Version)},
+		{"description", "info.description (default: the file's leading comments)", str(&p.Description)},
+		{"id", "document id", str(&p.ID)},
 		{"content_type", "default content type of messages", str(&p.ContentType)},
 		{"json_names", "true|false: lowerCamelCase JSON names (default true) or .proto names", BoolOption("json_names", &p.JSONNames)},
 		{"enum_values", "names|numbers|both", choice("enum_values", &p.EnumValues, EnumNames, EnumNumbers, EnumBoth)},
+		{"enums_as_ints", "true|false: shorthand for enum_values=numbers", func(v string) error {
+			var ints bool
+			if err := BoolOption("enums_as_ints", &ints)(v); err != nil {
+				return err
+			}
+			p.EnumValues = EnumNames
+			if ints {
+				p.EnumValues = EnumNumbers
+			}
+			return nil
+		}},
+		{"trim_unused_schemas", "true|false: only schemas reachable from an operation", BoolOption("trim_unused_schemas", &p.TrimUnusedSchemas)},
+		{"protovalidate", "true|false: translate buf.validate constraints (default true)", BoolOption("protovalidate", &p.Protovalidate)},
 		{"proto_types", "true|false: annotate fields with x-protobuf-type", BoolOption("proto_types", &p.ProtoTypes)},
 		{"services", "fully-qualified service glob, e.g. acme.orders.** (repeatable)", func(v string) error {
 			for _, g := range strings.Split(v, "|") {

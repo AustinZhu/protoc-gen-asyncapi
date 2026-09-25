@@ -20,7 +20,40 @@ type schemaGen struct {
 }
 
 func newSchemaGen(b *Builder) *schemaGen {
-	return &schemaGen{b: b, schemas: asyncapi.NewMap[*asyncapi.Schema](), rules: newValidateRules(b.Plugin)}
+	rules := &validateRules{disabled: true}
+	if b.Params.Protovalidate {
+		rules = newValidateRules(b.Plugin)
+	}
+	return &schemaGen{b: b, schemas: asyncapi.NewMap[*asyncapi.Schema](), rules: rules}
+}
+
+// addAll adds the schemas of every message and enum declared in files.
+func (g *schemaGen) addAll(files []*protogen.File) error {
+	var addEnums func(msgs []*protogen.Message)
+	addEnums = func(msgs []*protogen.Message) {
+		for _, m := range msgs {
+			for _, e := range m.Enums {
+				g.enumRef(e)
+			}
+			addEnums(m.Messages)
+		}
+	}
+	for _, f := range files {
+		var err error
+		WalkMessages(f.Messages, func(m *protogen.Message) {
+			if err == nil {
+				_, err = g.messageRef(m)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		for _, e := range f.Enums {
+			g.enumRef(e)
+		}
+		addEnums(f.Messages)
+	}
+	return nil
 }
 
 func schemaRef(name protoreflect.FullName) *asyncapi.Schema {

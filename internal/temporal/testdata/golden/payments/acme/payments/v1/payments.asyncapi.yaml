@@ -116,6 +116,8 @@ components:
       properties:
         refundId:
           type: string
+    acme.payments.v1.Refund:
+      type: object
   messages:
     acme.payments.v1.ChargeCardRequest:
       headers:

@@ -1,15 +1,15 @@
 syntax = "proto2";
 
-package legacy;
+package plain;
 
 import "asyncapi/v3/annotations.proto";
 
 // A proto2 service without annotations; included with include_all=true.
-service Legacy {
+service Plain {
   rpc Notify(Event) returns (Event);
 }
 
-// A legacy event.
+// A proto2 event.
 message Event {
   required string id = 1;
   optional int32 count = 2 [default = 7];

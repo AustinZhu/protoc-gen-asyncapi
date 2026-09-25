@@ -343,6 +343,9 @@ func (b *Builder) buildInfo(services []*protogen.Service) error {
 			return err
 		}
 	}
+	if b.Params.ID != "" {
+		b.Doc.ID = b.Params.ID
+	}
 	if b.Params.ContentType != "" {
 		b.Doc.DefaultContentType = b.Params.ContentType
 	}
@@ -358,6 +361,12 @@ func (b *Builder) buildInfo(services []*protogen.Service) error {
 		Version:        info.GetVersion(),
 		Description:    info.GetDescription(),
 		TermsOfService: info.GetTermsOfService(),
+	}
+	if b.Params.Title != "" {
+		i.Title = b.Params.Title
+	}
+	if b.Params.Description != "" {
+		i.Description = b.Params.Description
 	}
 	if i.Title == "" {
 		switch {
@@ -1080,6 +1089,14 @@ func (b *Builder) finish() error {
 			}
 		}
 		mi.Obj.Headers = h
+	}
+
+	// Unless trimmed, every message and enum of the documented files gets a
+	// schema, whether or not an operation references it.
+	if !b.Params.TrimUnusedSchemas && b.Params.Payload == "jsonschema" {
+		if err := b.schemas.addAll(b.Files); err != nil {
+			return err
+		}
 	}
 
 	// Components.

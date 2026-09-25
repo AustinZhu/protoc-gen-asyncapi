@@ -19,8 +19,7 @@ Three binaries are built from it:
 - **`protoc-gen-nats-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document only their own protocol and ignore
   the other's annotations.
 
-The plugin generates documentation only. It generates no code and never contacts a server. It replaces the separate
-[protoc-gen-nats-asyncapi](https://github.com/AustinZhu/protoc-gen-nats-asyncapi) repository.
+The plugin generates documentation only. It generates no code and never contacts a server.
 
 ## Quick start
 
@@ -138,18 +137,27 @@ them for each binary.
 | `asyncapi_version` | `3.1.0` | `3.1.0` or `3.0.0`. |
 | `merge` | `false` | Write one document for all files instead of one per file. |
 | `merge_file_name` | `asyncapi` | Base name of the merged document. |
-| `perspective` | `server` | `server`: the document describes the application handling the operations, which `receive`. `client`: operations `send`, as seen by callers. |
+| `perspective` | `server` | `server` (or `worker`): the document describes the application handling the operations, which `receive`. `client`: operations `send`, as seen by callers. |
 | `payload` | `jsonschema` | `jsonschema`, or `protobuf` to embed the `.proto` source as the payload schema. |
 | `services` | all | Fully-qualified service glob, such as `acme.orders.**`. Repeatable. |
-| `version` | `0.0.0` | `info.version`, unless the document annotation sets it. |
+| `title` | service or proto package | `info.title`. |
+| `version` | `0.0.0` | `info.version`. |
+| `description` | the file's leading comments | `info.description`. |
+| `id` | none | Document `id`. |
 | `content_type` | per protocol | Default content type of messages. |
 | `json_names` | `true` | lowerCamelCase JSON field names; `false` uses `.proto` names. |
 | `enum_values` | `names` | `names`, `numbers` or `both`. |
+| `enums_as_ints` | `false` | Shorthand for `enum_values=numbers`. |
 | `proto_types` | `false` | Annotate every property with its `x-protobuf-type`. |
+| `trim_unused_schemas` | `false` | Emit only schemas reachable from an operation. By default every message and enum of the documented files is included. |
+| `protovalidate` | `true` | Translate `buf.validate` constraints when `buf/validate/validate.proto` is among the inputs. |
+| `server_url` | none | Temporal only: frontend address (`host:port`, or a URL). Adds a `temporal` server. |
+| `namespace` | none | Temporal only: namespace of the document's Temporal servers that don't set one, as `x-temporal-namespace`. |
 | `include_all` | `false` | NATS only: also document services without NATS annotations. |
 
-Anything else about the document, such as its title, id, servers, security schemes, tags and external docs, is set
-with `(asyncapi.v3.document)` in the proto itself, so each file can carry its own.
+The same settings, and everything else about the document (servers, security schemes, tags, external docs and so
+on), can also be declared with `(asyncapi.v3.document)` in the proto itself, so each file can carry its own. When
+both are given, the plugin option wins.
 
 ## The core annotations
 

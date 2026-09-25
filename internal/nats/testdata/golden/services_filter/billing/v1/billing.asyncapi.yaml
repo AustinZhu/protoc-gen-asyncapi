@@ -26,6 +26,35 @@ servers:
       jetstreamDomain: hub
 defaultContentType: application/protobuf
 components:
+  schemas:
+    billing.v1.Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/billing.v1.Invoice.Line'
+        currency:
+          $ref: '#/components/schemas/billing.v1.Currency'
+      required:
+        - id
+    billing.v1.Invoice.Line:
+      type: object
+      properties:
+        text:
+          type: string
+        cents:
+          type: string
+          format: int64
+          pattern: ^-?[0-9]+$
+    billing.v1.Currency:
+      type: string
+      enum:
+        - CURRENCY_UNSPECIFIED
+        - CURRENCY_EUR
+        - CURRENCY_EURO
   securitySchemes:
     user:
       type: userPassword
@@ -60,8 +89,8 @@ x-nats-jetstream:
         tags:
           - ssd
       sources:
-        - name: LEGACY
-          filter_subject: legacy.>
+        - name: ARCHIVE
+          filter_subject: archive.>
           external:
             api: $JS.edge.API
       compression: s2

@@ -161,7 +161,7 @@ components:
             pattern: ^-?[0-9]+$
           additionalProperties:
             $ref: '#/components/schemas/acme.fulfillment.v1.LineItem'
-        legacyRef:
+        externalRef:
           type: string
           deprecated: true
       oneOf:
@@ -218,6 +218,12 @@ components:
         - ORDER_STATUS_UNSPECIFIED
         - ORDER_STATUS_COMPLETED
         - ORDER_STATUS_FAILED
+    acme.fulfillment.v1.AuditRecord:
+      description: Not referenced by any operation; kept unless trim-unused-schemas is set.
+      type: object
+      properties:
+        actor:
+          type: string
   messages:
     acme.fulfillment.v1.ProcessOrderInput:
       headers:
