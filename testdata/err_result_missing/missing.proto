@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package missing.v1;
+
+import "temporal/v1/options.proto";
+
+message DoInput {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_WORKFLOW, result: "DoResult"};
+}

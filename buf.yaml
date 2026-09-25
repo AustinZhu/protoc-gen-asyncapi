@@ -1,0 +1,11 @@
+# Workspace: the temporal/v1 options module and the example that uses it.
+version: v2
+modules:
+  - path: proto
+  - path: example/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

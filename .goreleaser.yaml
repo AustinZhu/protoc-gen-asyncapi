@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: protoc-gen-temporal-asyncapi
+
+builds:
+  - main: .
+    binary: protoc-gen-temporal-asyncapi
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/AustinZhu/protoc-gen-temporal-asyncapi/internal/plugin.Version={{ .Version }}
+
+archives:
+  # protoc-gen-temporal-asyncapi_<version>_<os>_<arch>.tar.gz, the naming
+  # "fetch a binary from a GitHub release" installers (ubi, aqua, mise) expect.
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - proto/temporal/v1/options.proto
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc

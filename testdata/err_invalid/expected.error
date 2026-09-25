@@ -1,0 +1,5 @@
+invalid.proto:7:1: message invalid.v1.NoKind: (temporal.v1.operation).kind must be set to a supported OperationKind, got OPERATION_KIND_UNSPECIFIED
+invalid.proto:11:1: message invalid.v1.SignalWithResult: signals cannot declare a result (got "SignalWithResult")
+invalid.proto:15:1: message invalid.v1.ActivityCan: supports_continue_as_new is only valid for workflows, not activities
+invalid.proto:19:1: message invalid.v1.BadTimeout: timeouts.execution is only valid for workflows, not activities
+invalid.proto:23:1: message invalid.v1.BadDuration: timeouts.run: "soon" is not a duration like "30s" or "1h30m"

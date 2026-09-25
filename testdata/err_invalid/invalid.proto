@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package invalid.v1;
+
+import "temporal/v1/options.proto";
+
+message NoKind {
+  option (temporal.v1.operation) = {name: "NoKind"};
+}
+
+message SignalWithResult {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_SIGNAL, result: "SignalWithResult"};
+}
+
+message ActivityCan {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_ACTIVITY, supports_continue_as_new: true};
+}
+
+message BadTimeout {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_ACTIVITY, timeouts: {execution: "1h"}};
+}
+
+message BadDuration {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_WORKFLOW, timeouts: {run: "soon"}};
+}

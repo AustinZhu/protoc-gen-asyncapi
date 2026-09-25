@@ -1,0 +1,12 @@
+{
+  "name": "asyncapi-validate",
+  "private": true,
+  "description": "Validates generated AsyncAPI documents with the official @asyncapi/parser.",
+  "type": "module",
+  "scripts": {
+    "validate": "node validate.mjs"
+  },
+  "dependencies": {
+    "@asyncapi/parser": "^3.6.3"
+  }
+}

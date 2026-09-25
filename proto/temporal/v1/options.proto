@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package temporal.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-temporal-asyncapi/gen/temporalv1;temporalv1";
+
+// Names the Temporal primitive an annotated message is the input of.
+enum OperationKind {
+  OPERATION_KIND_UNSPECIFIED = 0;
+  OPERATION_KIND_WORKFLOW = 1;
+  OPERATION_KIND_ACTIVITY = 2;
+  OPERATION_KIND_SIGNAL = 3;
+  OPERATION_KIND_QUERY = 4;
+  OPERATION_KIND_UPDATE = 5;
+  // Reserved for Temporal Nexus operations; not yet supported by the generator.
+  reserved 6;
+}
+
+// Binds a message to the Temporal Workflow, Activity, Signal, Query or Update it is the input of.
+//
+// Leading comments on the annotated message become the operation's description
+// in the generated AsyncAPI document.
+message OperationOptions {
+  // Which Temporal primitive this message is the input of. Required.
+  OperationKind kind = 1;
+  // Name registered with the Temporal worker (Workflow type / Activity / Signal / Query / Update name).
+  // Defaults to the message name with an "Input", "Request", "Args" or "Params" suffix removed,
+  // e.g. `ChargeCardInput` -> `ChargeCard`.
+  string name = 2;
+  // Result message name, relative to the annotated message's package (a nested message is written
+  // `Outer.Inner`); empty for Signals and result-less Updates. It must be in the same package.
+  string result = 3;
+  // Default task queue, when statically known.
+  string task_queue = 4;
+  // Whether a Workflow may continue-as-new into itself with this same input. Workflows only.
+  bool supports_continue_as_new = 5;
+  // Signals, Queries and Updates: the Workflow type names that handle this message. Used to
+  // group each handler with its Workflows in the generated document.
+  repeated string workflows = 6;
+  // Statically known timeouts. Workflows and Activities only.
+  Timeouts timeouts = 7;
+  // Statically known retry policy. Workflows and Activities only.
+  RetryPolicy retry_policy = 8;
+}
+
+// Timeouts are durations written like Go durations: "30s", "5m", "1h30m".
+message Timeouts {
+  // Workflow: total time for the Workflow Execution, including retries and continue-as-new.
+  string execution = 1;
+  // Workflow: time for a single Workflow Run.
+  string run = 2;
+  // Workflow: time for a single Workflow Task.
+  string task = 3;
+  // Activity: total time for the Activity Execution, including retries.
+  string schedule_to_close = 4;
+  // Activity: time for a single Activity Task Execution.
+  string start_to_close = 5;
+  // Activity: time an Activity Task may wait in the task queue.
+  string schedule_to_start = 6;
+  // Activity: maximum time between heartbeats.
+  string heartbeat = 7;
+}
+
+// Mirrors temporal.api.common.v1.RetryPolicy; intervals are Go-style durations.
+message RetryPolicy {
+  string initial_interval = 1;
+  double backoff_coefficient = 2;
+  string maximum_interval = 3;
+  // 0 means unlimited.
+  int32 maximum_attempts = 4;
+  repeated string non_retryable_error_types = 5;
+}
+
+extend google.protobuf.MessageOptions {
+  OperationOptions operation = 50101;
+}

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package acme.payments.v1;
+
+import "temporal/v1/options.proto";
+
+// Charges a card. Fire-and-forget: the workflow does not consume a result.
+message ChargeCardRequest {
+  option (temporal.v1.operation) = {
+    kind: OPERATION_KIND_ACTIVITY
+    task_queue: "payments"
+    timeouts: {start_to_close: "30s", heartbeat: "5s"}
+  };
+  string card_token = 1;
+  int64 amount_cents = 2;
+}
+
+// Refunds a charge and reports the refund.
+message RefundArgs {
+  option (temporal.v1.operation) = {
+    kind: OPERATION_KIND_ACTIVITY
+    name: "payments.refund"
+    result: "Refund.Receipt"
+  };
+  string charge_id = 1;
+}
+
+message Refund {
+  message Receipt {
+    string refund_id = 1;
+  }
+}

@@ -1,0 +1,5 @@
+syntax = "proto3";
+
+package other.v1;
+
+message Result {}

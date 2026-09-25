@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package acme.billing.v1;
+
+import "temporal/v1/options.proto";
+
+// Bills a customer.
+message CreateInvoiceInput {
+  option (temporal.v1.operation) = {kind: OPERATION_KIND_WORKFLOW, result: "Invoice"};
+  string customer_id = 1;
+}
+
+message Invoice {
+  string id = 1;
+}
