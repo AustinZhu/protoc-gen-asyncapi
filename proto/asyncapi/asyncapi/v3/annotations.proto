@@ -314,6 +314,23 @@ message Message {
   string correlation_id_description = 12;
   repeated Binding bindings = 13;
   map<string, string> extensions = 14;
+  // Payload schema as JSON, replacing the schema derived from the Protobuf
+  // message. Use it when Protobuf only describes the message and the wire
+  // payload is something else, e.g. raw bytes:
+  //
+  //   payload_schema: '{"type": "string", "format": "binary"}'
+  //
+  // Without payload_schema_format it is an AsyncAPI Schema Object (a JSON
+  // Schema draft-07 superset) and must be a valid schema. Headers, examples,
+  // bindings and the rest of the message annotations still apply;
+  // parameters and correlation IDs are no longer derived from the Protobuf
+  // fields, so set their locations explicitly.
+  string payload_schema = 15;
+  // Schema format of payload_schema when it is not an AsyncAPI Schema
+  // Object, e.g. "application/vnd.apache.avro+json;version=1.9.0". The
+  // payload then renders as a Multi Format Schema Object and may be any JSON
+  // value.
+  string payload_schema_format = 16;
 }
 
 message Header {
@@ -350,4 +367,17 @@ message Field {
   string format = 4;
   // Hides the field from the generated schema.
   bool hidden = 5;
+  // Schema of the field as JSON, replacing the one derived from its
+  // Protobuf type and buf.validate rules. Use it when the data is not
+  // encoded as canonical Protobuf JSON, e.g. a uint64 serialized as a JSON
+  // number instead of a string:
+  //
+  //   schema: '{"type": "integer", "minimum": 0}'
+  //
+  // It must be a valid AsyncAPI Schema Object. For repeated and map fields
+  // it describes the whole array or object. The field's comment,
+  // deprecation, google.api.field_behavior, format and examples are added
+  // unless the override sets those keywords; whether the field is required
+  // is decided as usual.
+  string schema = 6;
 }

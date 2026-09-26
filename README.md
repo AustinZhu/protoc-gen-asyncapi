@@ -208,8 +208,8 @@ specific to its protocol. Its options apply to any protocol:
 | `(asyncapi.v3.document)` | file | `id`, `info` (contact, license, tags, external docs), `default_content_type`, `servers` (with variables, security, bindings and extensions), `security_schemes` (every type, OAuth flows), tags, external docs and document extensions. |
 | `(asyncapi.v3.service)` | service | Tags, external docs, security and servers shared by every operation; `skip`. |
 | `(asyncapi.v3.operation)` | rpc | Operation id, title, summary, description, tags, external docs, security, reply address, bindings and extensions; the channel's id, title, parameters, servers, bindings and extensions; `skip`. |
-| `(asyncapi.v3.message)` | message | Name, title, summary, content type, headers, examples, correlation id, tags, bindings and extensions. |
-| `(asyncapi.v3.field)` | field | Examples, `required`, `format`, `correlation_id`, `hidden`. |
+| `(asyncapi.v3.message)` | message | Name, title, summary, content type, headers, examples, correlation id, tags, bindings and extensions; `payload_schema` and `payload_schema_format` to [replace the payload schema](#overriding-schemas). |
+| `(asyncapi.v3.field)` | field | Examples, `required`, `format`, `correlation_id`, `hidden`; `schema` to [replace the field's schema](#overriding-schemas). |
 
 Bindings take a protocol name and a JSON value. The plugin accepts only the protocols the chosen AsyncAPI version
 defines for that object, or `x-` keys; 3.1 adds `ros2`. Every generated document is checked against the rules of the
@@ -304,6 +304,49 @@ Schemas describe the canonical **Protobuf JSON** encoding.
 When `buf/validate/validate.proto` is among the inputs, protovalidate constraints become `minLength`, `pattern`,
 `format`, `minimum`, `minItems`, `required` and the like. Constraints JSON Schema can't express, such as CEL, are
 skipped rather than approximated.
+
+### Overriding schemas
+
+The mapping above assumes the data travels as canonical Protobuf JSON. When it doesn't, give the schema yourself as
+JSON in the annotation. The generated schema stays the default.
+
+**A whole payload.** Some payloads use Protobuf only to describe the message, such as a raw binary body with its
+metadata in headers. `(asyncapi.v3.message).payload_schema` replaces the payload, so there's no wrapper object:
+
+```proto
+message Frame {
+  option (asyncapi.v3.message) = {
+    content_type: "image/jpeg"
+    payload_schema: '{"type": "string", "format": "binary", "contentMediaType": "image/jpeg"}'
+    headers: [{name: "Camera-Id", required: true}]
+  };
+  bytes jpeg = 1;
+}
+```
+
+- The override is an AsyncAPI Schema Object and may use any keyword, including a `$ref` to a component schema.
+- Headers, examples, bindings, tags and the other message annotations still apply.
+- For another schema format, set `payload_schema_format`, for example
+  `"application/vnd.apache.avro+json;version=1.9.0"`. The payload then renders as a Multi Format Schema Object, and
+  `payload_schema` may be any JSON value.
+- The payload no longer follows the Protobuf fields, so channel parameters are no longer located in it and a field's
+  `correlation_id` is rejected. Set `(asyncapi.v3.message).correlation_id` or the parameter `location` instead.
+
+**A single field.** Some serializers write Protobuf-shaped data differently; for example, Serde writes Rust `u64` as
+JSON numbers, not strings. `(asyncapi.v3.field).schema` replaces the field's schema:
+
+```proto
+uint64 read_at_ns = 2 [(asyncapi.v3.field) = {schema: '{"type": "integer", "minimum": 0}'}];
+```
+
+- The override replaces the type and every constraint, including those from buf.validate.
+- For repeated and map fields it describes the whole array or object.
+- The field's comment, deprecation, `google.api.field_behavior`, `format` and examples are still added, unless the
+  override sets those keywords.
+- Whether the field is required is decided as before.
+
+Both overrides must be valid JSON Schema (draft-07). Generation fails with `file:line:column` otherwise. Examples keep
+64-bit integers exact.
 
 ## Adding a protocol
 

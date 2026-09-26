@@ -1624,8 +1624,25 @@ type Message struct {
 	CorrelationIdDescription string            `protobuf:"bytes,12,opt,name=correlation_id_description,json=correlationIdDescription,proto3" json:"correlation_id_description,omitempty"`
 	Bindings                 []*Binding        `protobuf:"bytes,13,rep,name=bindings,proto3" json:"bindings,omitempty"`
 	Extensions               map[string]string `protobuf:"bytes,14,rep,name=extensions,proto3" json:"extensions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// Payload schema as JSON, replacing the schema derived from the Protobuf
+	// message. Use it when Protobuf only describes the message and the wire
+	// payload is something else, e.g. raw bytes:
+	//
+	//	payload_schema: '{"type": "string", "format": "binary"}'
+	//
+	// Without payload_schema_format it is an AsyncAPI Schema Object (a JSON
+	// Schema draft-07 superset) and must be a valid schema. Headers, examples,
+	// bindings and the rest of the message annotations still apply;
+	// parameters and correlation IDs are no longer derived from the Protobuf
+	// fields, so set their locations explicitly.
+	PayloadSchema string `protobuf:"bytes,15,opt,name=payload_schema,json=payloadSchema,proto3" json:"payload_schema,omitempty"`
+	// Schema format of payload_schema when it is not an AsyncAPI Schema
+	// Object, e.g. "application/vnd.apache.avro+json;version=1.9.0". The
+	// payload then renders as a Multi Format Schema Object and may be any JSON
+	// value.
+	PayloadSchemaFormat string `protobuf:"bytes,16,opt,name=payload_schema_format,json=payloadSchemaFormat,proto3" json:"payload_schema_format,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
@@ -1754,6 +1771,20 @@ func (x *Message) GetExtensions() map[string]string {
 		return x.Extensions
 	}
 	return nil
+}
+
+func (x *Message) GetPayloadSchema() string {
+	if x != nil {
+		return x.PayloadSchema
+	}
+	return ""
+}
+
+func (x *Message) GetPayloadSchemaFormat() string {
+	if x != nil {
+		return x.PayloadSchemaFormat
+	}
+	return ""
 }
 
 type Header struct {
@@ -1933,7 +1964,20 @@ type Field struct {
 	// JSON Schema format, e.g. "uuid", "email", "uri".
 	Format string `protobuf:"bytes,4,opt,name=format,proto3" json:"format,omitempty"`
 	// Hides the field from the generated schema.
-	Hidden        bool `protobuf:"varint,5,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	Hidden bool `protobuf:"varint,5,opt,name=hidden,proto3" json:"hidden,omitempty"`
+	// Schema of the field as JSON, replacing the one derived from its
+	// Protobuf type and buf.validate rules. Use it when the data is not
+	// encoded as canonical Protobuf JSON, e.g. a uint64 serialized as a JSON
+	// number instead of a string:
+	//
+	//	schema: '{"type": "integer", "minimum": 0}'
+	//
+	// It must be a valid AsyncAPI Schema Object. For repeated and map fields
+	// it describes the whole array or object. The field's comment,
+	// deprecation, google.api.field_behavior, format and examples are added
+	// unless the override sets those keywords; whether the field is required
+	// is decided as usual.
+	Schema        string `protobuf:"bytes,6,opt,name=schema,proto3" json:"schema,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2001,6 +2045,13 @@ func (x *Field) GetHidden() bool {
 		return x.Hidden
 	}
 	return false
+}
+
+func (x *Field) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
 }
 
 var file_asyncapi_v3_annotations_proto_extTypes = []protoimpl.ExtensionInfo{
@@ -2251,7 +2302,7 @@ const file_asyncapi_v3_annotations_proto_rawDesc = "" +
 	"\x04enum\x18\x03 \x03(\tR\x04enum\x12\x18\n" +
 	"\adefault\x18\x04 \x01(\tR\adefault\x12\x1a\n" +
 	"\bexamples\x18\x05 \x03(\tR\bexamples\x12\x1a\n" +
-	"\blocation\x18\x06 \x01(\tR\blocation\"\xa5\x05\n" +
+	"\blocation\x18\x06 \x01(\tR\blocation\"\x80\x06\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x18\n" +
@@ -2269,7 +2320,9 @@ const file_asyncapi_v3_annotations_proto_rawDesc = "" +
 	"\bbindings\x18\r \x03(\v2\x14.asyncapi.v3.BindingR\bbindings\x12D\n" +
 	"\n" +
 	"extensions\x18\x0e \x03(\v2$.asyncapi.v3.Message.ExtensionsEntryR\n" +
-	"extensions\x1a=\n" +
+	"extensions\x12%\n" +
+	"\x0epayload_schema\x18\x0f \x01(\tR\rpayloadSchema\x122\n" +
+	"\x15payload_schema_format\x18\x10 \x01(\tR\x13payloadSchemaFormat\x1a=\n" +
 	"\x0fExtensionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbc\x01\n" +
@@ -2288,13 +2341,14 @@ const file_asyncapi_v3_annotations_proto_rawDesc = "" +
 	"\aheaders\x18\x04 \x03(\v2!.asyncapi.v3.Example.HeadersEntryR\aheaders\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x01\n" +
 	"\x05Field\x12\x1a\n" +
 	"\bexamples\x18\x01 \x03(\tR\bexamples\x12\x1a\n" +
 	"\brequired\x18\x02 \x01(\bR\brequired\x12%\n" +
 	"\x0ecorrelation_id\x18\x03 \x01(\bR\rcorrelationId\x12\x16\n" +
 	"\x06format\x18\x04 \x01(\tR\x06format\x12\x16\n" +
-	"\x06hidden\x18\x05 \x01(\bR\x06hidden*\xa2\x04\n" +
+	"\x06hidden\x18\x05 \x01(\bR\x06hidden\x12\x16\n" +
+	"\x06schema\x18\x06 \x01(\tR\x06schema*\xa2\x04\n" +
 	"\x12SecuritySchemeType\x12$\n" +
 	" SECURITY_SCHEME_TYPE_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"SECURITY_SCHEME_TYPE_USER_PASSWORD\x10\x01\x12 \n" +

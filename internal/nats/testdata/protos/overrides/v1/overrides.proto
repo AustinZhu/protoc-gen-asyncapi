@@ -1,0 +1,124 @@
+// Schema overrides: payloads and fields whose wire form is not canonical
+// Protobuf JSON.
+syntax = "proto3";
+
+package overrides.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/empty.proto";
+import "nats/asyncapi/v1/annotations.proto";
+
+option (nats.asyncapi.v1.document) = {
+  streams: [
+    {
+      name: "FRAMES"
+      subjects: ["site.cameras.>"]
+    }
+  ]
+};
+
+// Devices of a site.
+service Site {
+  option (nats.asyncapi.v1.service) = {subject_prefix: "site"};
+
+  // Stores camera frames.
+  rpc Capture(Frame) returns (google.protobuf.Empty) {
+    option (nats.asyncapi.v1.operation) = {
+      subject: "cameras.{camera}.frames"
+      stream: "FRAMES"
+    };
+  }
+
+  // Publishes meter readings.
+  rpc Readings(google.protobuf.Empty) returns (stream MeterReading) {
+    option (nats.asyncapi.v1.operation) = {subject: "meters.{meter}.readings"};
+  }
+
+  // Publishes daily totals, encoded with Avro.
+  rpc Totals(google.protobuf.Empty) returns (stream DailyTotals) {
+    option (nats.asyncapi.v1.operation) = {subject: "meters.{meter}.daily"};
+  }
+}
+
+// A camera frame: the body is the JPEG image itself, its metadata travels
+// in NATS headers.
+message Frame {
+  option (asyncapi.v3.message) = {
+    content_type: "image/jpeg"
+    payload_schema: '{"type": "string", "format": "binary", "contentMediaType": "image/jpeg", "description": "JPEG-encoded frame.", "maxLength": 5242880}'
+    headers: [
+      {
+        name: "Camera-Id"
+        required: true
+        description: "Camera that captured the frame."
+      },
+      {
+        name: "Captured-At-Ms"
+        required: true
+        pattern: "^[0-9]+$"
+      }
+    ]
+    examples: [
+      {
+        name: "frame"
+        payload: '"/9j/4AAQSkZJRg=="'
+        headers: {
+          key: "Camera-Id"
+          value: "cam-12"
+        }
+      }
+    ]
+    bindings: [
+      {
+        protocol: "x-imaging"
+        json: '{"colorSpace": "sRGB"}'
+      }
+    ]
+  };
+
+  // Only used to generate code; the wire payload is the image itself.
+  bytes jpeg = 1;
+  string camera = 2;
+}
+
+// A meter reading, serialized with Serde: 64-bit integers are JSON numbers.
+message MeterReading {
+  string meter = 1;
+  // When the reading was taken, in nanoseconds since the epoch.
+  uint64 read_at_ns = 2 [(asyncapi.v3.field) = {
+    schema: '{"type": "integer", "minimum": 0}'
+    examples: ["1767225600000000000"]
+  }];
+  // Replaced by the override's own description and constraints; the
+  // buf.validate bound no longer applies, but required does.
+  uint64 energy_wh = 3 [
+    (asyncapi.v3.field) = {schema: '{"type": "integer", "minimum": 1, "description": "Energy since the last reading (Wh)."}'},
+    (buf.validate.field).uint64 = {gte: 5},
+    (buf.validate.field).required = true
+  ];
+  // Kept as canonical Protobuf JSON.
+  uint64 sequence = 4;
+  // Energy per interval, as JSON numbers.
+  repeated uint64 interval_wh = 5 [(asyncapi.v3.field) = {schema: '{"type": "array", "items": {"type": "integer", "minimum": 0}}'}];
+  // Set by the server.
+  int64 revision = 6 [
+    (asyncapi.v3.field) = {schema: '{"type": "integer"}'},
+    (google.api.field_behavior) = OUTPUT_ONLY
+  ];
+  // Refers to a component schema.
+  bytes previous_totals = 7 [(asyncapi.v3.field) = {schema: '{"$ref": "#/components/schemas/overrides.v1.DailyTotals"}'}];
+}
+
+// Daily totals of a meter, encoded with Avro.
+message DailyTotals {
+  option (asyncapi.v3.message) = {
+    content_type: "application/vnd.apache.avro"
+    payload_schema_format: "application/vnd.apache.avro+json;version=1.9.0"
+    payload_schema: '{"type": "record", "name": "DailyTotals", "fields": [{"name": "meter", "type": "string"}, {"name": "total_wh", "type": "long"}]}'
+  };
+
+  string meter = 1;
+  int64 total_wh = 2;
+}

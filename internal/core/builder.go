@@ -129,6 +129,9 @@ type Message struct {
 
 	headers  *asyncapi.Map[*asyncapi.Schema]
 	required map[string]bool
+	// overridden reports a payload replaced by payload_schema: it no longer
+	// follows the Protobuf fields.
+	overridden bool
 }
 
 // AddHeader documents a header unless already present.
@@ -934,13 +937,17 @@ func (b *Builder) Message(m *protogen.Message) (*Message, error) {
 		return nil, err
 	}
 
-	payload, err := b.payload(m)
+	override, err := payloadOverride(w, opt.GetPayloadSchema(), opt.GetPayloadSchemaFormat())
 	if err != nil {
 		return nil, err
 	}
-	msg.Payload = payload
+	if override != nil {
+		msg.Payload = override
+	} else if msg.Payload, err = b.payload(m); err != nil {
+		return nil, err
+	}
 
-	mi := &Message{ID: id, Obj: msg, Proto: m, headers: asyncapi.NewMap[*asyncapi.Schema](), required: map[string]bool{}}
+	mi := &Message{ID: id, Obj: msg, Proto: m, headers: asyncapi.NewMap[*asyncapi.Schema](), required: map[string]bool{}, overridden: override != nil}
 	for _, h := range opt.GetHeaders() {
 		if h.GetName() == "" {
 			return nil, Errorf(m.Desc, "header name is required")
@@ -963,6 +970,9 @@ func (b *Builder) Message(m *protogen.Message) (*Message, error) {
 		msg.CorrelationID = &asyncapi.CorrelationID{Location: loc, Description: opt.GetCorrelationIdDescription()}
 	}
 	for _, f := range m.Fields {
+		if fieldOptions(f).GetCorrelationId() && override != nil {
+			return nil, Errorf(f.Desc, "correlation_id: the payload of %s is replaced by payload_schema, so set (asyncapi.v3.message).correlation_id instead", m.Desc.Name())
+		}
 		if fieldOptions(f).GetCorrelationId() {
 			if msg.CorrelationID != nil {
 				return nil, Errorf(f.Desc, "message %s already has a correlation ID", m.Desc.Name())
@@ -992,7 +1002,7 @@ func (b *Builder) Message(m *protogen.Message) (*Message, error) {
 		}
 		msg.Examples = append(msg.Examples, out)
 	}
-	if len(msg.Examples) == 0 {
+	if len(msg.Examples) == 0 && override == nil {
 		if ex, err := b.schemas.autoExample(m); err != nil {
 			return nil, err
 		} else if ex != nil {
@@ -1138,7 +1148,7 @@ func (b *Builder) finish() error {
 // address parameter from a payload field with a matching name.
 func (b *Builder) bindParameter(ch *Channel, name string, p *asyncapi.Parameter) {
 	for _, mi := range ch.Messages {
-		if mi.Proto == nil {
+		if mi.Proto == nil || mi.overridden {
 			continue
 		}
 		for _, f := range mi.Proto.Fields {
@@ -1159,7 +1169,7 @@ func (b *Builder) bindParameter(ch *Channel, name string, p *asyncapi.Parameter)
 			if len(p.Examples) == 0 {
 				for _, e := range fieldOptions(f).GetExamples() {
 					var v any
-					if json.Unmarshal([]byte(e), &v) == nil {
+					if decodeInto(e, &v) == nil {
 						p.Examples = append(p.Examples, fmt.Sprint(v))
 					}
 				}

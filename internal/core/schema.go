@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -113,7 +112,13 @@ func (g *schemaGen) messageSchema(m *protogen.Message) (*asyncapi.Schema, error)
 		if behaviors[behaviorInputOnly] {
 			fs.WriteOnly = true
 		}
-		if req, err := g.rules.apply(f, fs); err != nil {
+		target := fs
+		if fo.GetSchema() != "" {
+			// The override replaces the constraints; only whether the
+			// field is required still comes from buf.validate.
+			target = &asyncapi.Schema{}
+		}
+		if req, err := g.rules.apply(f, target); err != nil {
 			return nil, err
 		} else if req {
 			required = true
@@ -165,6 +170,12 @@ func (g *schemaGen) messageSchema(m *protogen.Message) (*asyncapi.Schema, error)
 func (g *schemaGen) fieldSchema(f *protogen.Field) (*asyncapi.Schema, error) {
 	var s *asyncapi.Schema
 	switch {
+	case fieldOptions(f).GetSchema() != "":
+		raw, err := decodeSchema("schema", fieldOptions(f).GetSchema())
+		if err != nil {
+			return nil, Errorf(f.Desc, "field %s: %v", f.Desc.FullName(), err)
+		}
+		s = &asyncapi.Schema{Raw: raw}
 	case f.Desc.IsMap():
 		key, val := f.Message.Fields[0], f.Message.Fields[1]
 		vs, err := g.singular(val)
@@ -221,7 +232,7 @@ func (g *schemaGen) fieldSchema(f *protogen.Field) (*asyncapi.Schema, error) {
 	}
 	for i, e := range fo.GetExamples() {
 		var v any
-		if err := json.Unmarshal([]byte(e), &v); err != nil {
+		if err := decodeInto(e, &v); err != nil {
 			return nil, Errorf(f.Desc, "example %d is not valid JSON (strings must be quoted, e.g. \"\\\"abc\\\"\"): %v", i+1, err)
 		}
 		s.Examples = append(s.Examples, v)
@@ -396,7 +407,7 @@ func (g *schemaGen) autoExample(m *protogen.Message) (*asyncapi.Map[any], error)
 			continue
 		}
 		var v any
-		if err := json.Unmarshal([]byte(ex[0]), &v); err != nil {
+		if err := decodeInto(ex[0], &v); err != nil {
 			return nil, Errorf(f.Desc, "example is not valid JSON: %v", err)
 		}
 		if out == nil {

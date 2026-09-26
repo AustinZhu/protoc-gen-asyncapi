@@ -122,7 +122,7 @@ func decodeExtensions(where string, in map[string]string, ext *asyncapi.Extensio
 			return fmt.Errorf("%s: extension %q must start with \"x-\"", where, k)
 		}
 		var v any
-		if err := json.Unmarshal([]byte(in[k]), &v); err != nil {
+		if err := decodeInto(in[k], &v); err != nil {
 			return fmt.Errorf("%s: extension %q is not valid JSON (strings must be quoted): %v", where, k, err)
 		}
 		if *ext == nil {

@@ -171,6 +171,9 @@ func rewriteRefs(s *asyncapi.Schema) *asyncapi.Schema {
 	if strings.HasPrefix(c.Ref, "#/components/schemas/") {
 		c.Ref = "#/$defs/" + strings.TrimPrefix(c.Ref, "#/components/schemas/")
 	}
+	if c.Raw != nil {
+		c.Raw = rewriteRawRefs(c.Raw).(*asyncapi.Map[any])
+	}
 	each := func(list []*asyncapi.Schema) []*asyncapi.Schema {
 		var out []*asyncapi.Schema
 		for _, x := range list {
@@ -202,4 +205,28 @@ func rewriteRefs(s *asyncapi.Schema) *asyncapi.Schema {
 		c.AdditionalProperties = rewriteRefs(ap)
 	}
 	return c
+}
+
+// rewriteRawRefs copies verbatim schema keywords, pointing component
+// references at $defs.
+func rewriteRawRefs(v any) any {
+	switch t := v.(type) {
+	case *asyncapi.Map[any]:
+		out := asyncapi.NewMap[any]()
+		for _, k := range t.Keys() {
+			x, _ := t.Get(k)
+			if ref, ok := x.(string); ok && k == "$ref" && strings.HasPrefix(ref, "#/components/schemas/") {
+				x = "#/$defs/" + strings.TrimPrefix(ref, "#/components/schemas/")
+			}
+			out.Set(k, rewriteRawRefs(x))
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = rewriteRawRefs(x)
+		}
+		return out
+	}
+	return v
 }

@@ -1,0 +1,286 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Site",
+    "version": "0.0.0",
+    "description": "Schema overrides: payloads and fields whose wire form is not canonical\nProtobuf JSON.",
+    "tags": [
+      {
+        "name": "Site",
+        "description": "Devices of a site."
+      }
+    ]
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "site.cameras.camera.frames": {
+      "address": "site.cameras.{camera}.frames",
+      "messages": {
+        "overrides.v1.Frame": {
+          "$ref": "#/components/messages/overrides.v1.Frame"
+        }
+      },
+      "parameters": {
+        "camera": {}
+      },
+      "x-nats-jetstream": {
+        "stream": "FRAMES"
+      }
+    },
+    "site.meters.meter.readings": {
+      "address": "site.meters.{meter}.readings",
+      "messages": {
+        "overrides.v1.MeterReading": {
+          "$ref": "#/components/messages/overrides.v1.MeterReading"
+        }
+      },
+      "parameters": {
+        "meter": {
+          "location": "$message.payload#/meter"
+        }
+      }
+    },
+    "site.meters.meter.daily": {
+      "address": "site.meters.{meter}.daily",
+      "messages": {
+        "overrides.v1.DailyTotals": {
+          "$ref": "#/components/messages/overrides.v1.DailyTotals"
+        }
+      },
+      "parameters": {
+        "meter": {}
+      }
+    }
+  },
+  "operations": {
+    "Site.Capture": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/site.cameras.camera.frames"
+      },
+      "summary": "Stores camera frames.",
+      "tags": [
+        {
+          "name": "Site"
+        }
+      ],
+      "messages": [
+        {
+          "$ref": "#/channels/site.cameras.camera.frames/messages/overrides.v1.Frame"
+        }
+      ],
+      "x-protobuf-method": "overrides.v1.Site.Capture"
+    },
+    "Site.Readings": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/site.meters.meter.readings"
+      },
+      "summary": "Publishes meter readings.",
+      "tags": [
+        {
+          "name": "Site"
+        }
+      ],
+      "messages": [
+        {
+          "$ref": "#/channels/site.meters.meter.readings/messages/overrides.v1.MeterReading"
+        }
+      ],
+      "x-protobuf-method": "overrides.v1.Site.Readings"
+    },
+    "Site.Totals": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/site.meters.meter.daily"
+      },
+      "summary": "Publishes daily totals, encoded with Avro.",
+      "tags": [
+        {
+          "name": "Site"
+        }
+      ],
+      "messages": [
+        {
+          "$ref": "#/channels/site.meters.meter.daily/messages/overrides.v1.DailyTotals"
+        }
+      ],
+      "x-protobuf-method": "overrides.v1.Site.Totals"
+    }
+  },
+  "components": {
+    "schemas": {
+      "overrides.v1.MeterReading": {
+        "description": "A meter reading, serialized with Serde: 64-bit integers are JSON numbers.",
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "readAtNs": {
+            "description": "When the reading was taken, in nanoseconds since the epoch.",
+            "examples": [
+              1767225600000000000
+            ],
+            "type": "integer",
+            "minimum": 0
+          },
+          "energyWh": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Energy since the last reading (Wh)."
+          },
+          "sequence": {
+            "description": "Kept as canonical Protobuf JSON.",
+            "type": "string",
+            "format": "uint64",
+            "pattern": "^[0-9]+$"
+          },
+          "intervalWh": {
+            "description": "Energy per interval, as JSON numbers.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "revision": {
+            "description": "Set by the server.",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "previousTotals": {
+            "description": "Refers to a component schema.",
+            "$ref": "#/components/schemas/overrides.v1.DailyTotals"
+          }
+        },
+        "required": [
+          "energyWh"
+        ]
+      },
+      "overrides.v1.Frame": {
+        "description": "A camera frame: the body is the JPEG image itself, its metadata travels\nin NATS headers.",
+        "type": "object",
+        "properties": {
+          "jpeg": {
+            "description": "Only used to generate code; the wire payload is the image itself.",
+            "type": "string",
+            "format": "byte",
+            "contentEncoding": "base64"
+          },
+          "camera": {
+            "type": "string"
+          }
+        }
+      },
+      "overrides.v1.DailyTotals": {
+        "description": "Daily totals of a meter, encoded with Avro.",
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "totalWh": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?[0-9]+$"
+          }
+        }
+      }
+    },
+    "messages": {
+      "overrides.v1.Frame": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "Camera-Id": {
+              "description": "Camera that captured the frame.",
+              "type": "string"
+            },
+            "Captured-At-Ms": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          "required": [
+            "Camera-Id",
+            "Captured-At-Ms"
+          ]
+        },
+        "payload": {
+          "type": "string",
+          "format": "binary",
+          "contentMediaType": "image/jpeg",
+          "description": "JPEG-encoded frame.",
+          "maxLength": 5242880
+        },
+        "contentType": "image/jpeg",
+        "name": "Frame",
+        "summary": "A camera frame: the body is the JPEG image itself, its metadata travels in NATS headers.",
+        "bindings": {
+          "x-imaging": {
+            "colorSpace": "sRGB"
+          }
+        },
+        "examples": [
+          {
+            "name": "frame",
+            "headers": {
+              "Camera-Id": "cam-12"
+            },
+            "payload": "/9j/4AAQSkZJRg=="
+          }
+        ],
+        "x-protobuf-message": "overrides.v1.Frame"
+      },
+      "overrides.v1.MeterReading": {
+        "payload": {
+          "$ref": "#/components/schemas/overrides.v1.MeterReading"
+        },
+        "name": "MeterReading",
+        "summary": "A meter reading, serialized with Serde: 64-bit integers are JSON numbers.",
+        "examples": [
+          {
+            "payload": {
+              "readAtNs": 1767225600000000000
+            }
+          }
+        ],
+        "x-protobuf-message": "overrides.v1.MeterReading"
+      },
+      "overrides.v1.DailyTotals": {
+        "payload": {
+          "schemaFormat": "application/vnd.apache.avro+json;version=1.9.0",
+          "schema": {
+            "type": "record",
+            "name": "DailyTotals",
+            "fields": [
+              {
+                "name": "meter",
+                "type": "string"
+              },
+              {
+                "name": "total_wh",
+                "type": "long"
+              }
+            ]
+          }
+        },
+        "contentType": "application/vnd.apache.avro",
+        "name": "DailyTotals",
+        "summary": "Daily totals of a meter, encoded with Avro.",
+        "x-protobuf-message": "overrides.v1.DailyTotals"
+      }
+    }
+  },
+  "x-nats-jetstream": {
+    "streams": {
+      "FRAMES": {
+        "name": "FRAMES",
+        "subjects": [
+          "site.cameras.>"
+        ]
+      }
+    }
+  }
+}

@@ -422,6 +422,9 @@ type Schema struct {
 	ExternalDocs         *ExternalDocs `yaml:"externalDocs,omitempty"`
 	Examples             []any         `yaml:"examples,omitempty"`
 	Extensions           Extensions    `yaml:",inline"`
+	// Raw holds keywords given verbatim (e.g. by an annotation), rendered
+	// in their order after the typed fields they do not override.
+	Raw *Map[any] `yaml:"-"`
 }
 
 // Clone returns a shallow copy of s.

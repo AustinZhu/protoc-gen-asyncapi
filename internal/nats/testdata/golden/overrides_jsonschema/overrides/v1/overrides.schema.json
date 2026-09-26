@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Site",
+  "description": "Schema overrides: payloads and fields whose wire form is not canonical\nProtobuf JSON.",
+  "anyOf": [
+    {
+      "type": "string",
+      "format": "binary",
+      "contentMediaType": "image/jpeg",
+      "description": "JPEG-encoded frame.",
+      "maxLength": 5242880
+    },
+    {
+      "$ref": "#/$defs/overrides.v1.MeterReading"
+    }
+  ],
+  "$defs": {
+    "overrides.v1.MeterReading": {
+      "description": "A meter reading, serialized with Serde: 64-bit integers are JSON numbers.",
+      "type": "object",
+      "properties": {
+        "meter": {
+          "type": "string"
+        },
+        "readAtNs": {
+          "description": "When the reading was taken, in nanoseconds since the epoch.",
+          "examples": [
+            1767225600000000000
+          ],
+          "type": "integer",
+          "minimum": 0
+        },
+        "energyWh": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Energy since the last reading (Wh)."
+        },
+        "sequence": {
+          "description": "Kept as canonical Protobuf JSON.",
+          "type": "string",
+          "format": "uint64",
+          "pattern": "^[0-9]+$"
+        },
+        "intervalWh": {
+          "description": "Energy per interval, as JSON numbers.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "revision": {
+          "description": "Set by the server.",
+          "readOnly": true,
+          "type": "integer"
+        },
+        "previousTotals": {
+          "description": "Refers to a component schema.",
+          "$ref": "#/$defs/overrides.v1.DailyTotals"
+        }
+      },
+      "required": [
+        "energyWh"
+      ]
+    },
+    "overrides.v1.Frame": {
+      "description": "A camera frame: the body is the JPEG image itself, its metadata travels\nin NATS headers.",
+      "type": "object",
+      "properties": {
+        "jpeg": {
+          "description": "Only used to generate code; the wire payload is the image itself.",
+          "type": "string",
+          "format": "byte",
+          "contentEncoding": "base64"
+        },
+        "camera": {
+          "type": "string"
+        }
+      }
+    },
+    "overrides.v1.DailyTotals": {
+      "description": "Daily totals of a meter, encoded with Avro.",
+      "type": "object",
+      "properties": {
+        "meter": {
+          "type": "string"
+        },
+        "totalWh": {
+          "type": "string",
+          "format": "int64",
+          "pattern": "^-?[0-9]+$"
+        }
+      }
+    }
+  }
+}
