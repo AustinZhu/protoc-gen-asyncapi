@@ -320,7 +320,8 @@ failure:
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
 3. GoReleaser publishes the GitHub release and the four binaries.
-4. The four annotation modules are pushed to the BSR, labeled with the tag. The example modules are never published,
+4. The four annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
+   the `main` label, the BSR's default, so unpinned dependencies resolve to it. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the

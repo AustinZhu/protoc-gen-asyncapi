@@ -171,6 +171,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: bufbuild/buf-action@v1
         with:
@@ -188,12 +189,20 @@ jobs:
             echo "::error::The BUF_TOKEN Actions secret is not set."
             exit 1
           fi
+          # The newest stable release also moves the BSR's default label
+          # (main), so the module page and unpinned dependencies get it.
+          # Pre-releases and patches of older lines only get their own label.
+          labels=(--label "$TAG")
+          latest="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          if [ "$TAG" = "$latest" ]; then
+            labels+=(--label main)
+          fi
           for path in $BSR_MODULE_PATHS; do
             name="$(buf config ls-modules --format json | jq -r --arg p "$path" 'select(.path == $p) | .name // empty')"
             if [ -z "$name" ]; then
               echo "::error file=buf.yaml::The '$path' module has no 'name' in buf.yaml."
               exit 1
             fi
-            echo "Publishing $path to $name with label $TAG"
-            buf push "$path" --label "$TAG" --source-control-url "$SOURCE_URL" --error-format github-actions
+            echo "Publishing $path to $name with labels: ${labels[*]}"
+            buf push "$path" "${labels[@]}" --source-control-url "$SOURCE_URL" --error-format github-actions
           done
