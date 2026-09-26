@@ -1,0 +1,334 @@
+// Apache Kafka annotations for protoc-gen-asyncapi
+// (protoc-gen-kafka-asyncapi).
+//
+// These annotations carry only Kafka concepts: topics and their
+// configuration, message keys and schema registry details, producers,
+// consumer groups, request/reply, and Kafka specifics of servers and
+// authentication. Everything generic (info, servers, security schemes, tags,
+// summaries, examples, headers, ...) uses the asyncapi.v3 annotations
+// (asyncapi/v3/annotations.proto). Record headers are documented as message
+// headers.
+//
+// The generated documents use the official AsyncAPI Kafka bindings (0.5.0);
+// producer and consumer settings they do not define are added to them as
+// x-kafka extensions.
+//
+// A service only needs enough annotations to say "this is a Kafka API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - produce vs. consume vs. request/reply is inferred from the rpc shape,
+//     as documented on Pattern;
+//   - topic names default to "<package>.<service>.<method>" in snake_case;
+//   - `{name}` placeholders in topic names are channel parameters, bound to
+//     payload fields with the same name.
+//
+// Durations are strings in Go syntax, e.g. "500ms", "30s", "168h".
+syntax = "proto3";
+
+package kafka.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/kafka/asyncapi/v1;kafkav1";
+
+extend google.protobuf.FileOptions {
+  // Kafka specifics of the document: servers, authentication and topics.
+  Document document = 58360;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Kafka defaults applied to every rpc of the service.
+  Service service = 58360;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the Kafka operation implemented by an rpc.
+  Operation operation = 58360;
+}
+
+extend google.protobuf.MessageOptions {
+  // Kafka properties of a message (key, schema registry), and optionally
+  // its own topic.
+  Message message = 58360;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the Kafka specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // Kafka details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 1;
+  // SASL or TLS mechanism of security schemes declared in
+  // (asyncapi.v3.document).security_schemes.
+  repeated Auth auth = 2;
+  // Topics.
+  repeated Topic topics = 3;
+}
+
+// Server adds Kafka details to a server (a bootstrap broker) declared with
+// the asyncapi.v3 annotations.
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // URL of the schema registry, e.g. "https://registry.acme.example".
+  string schema_registry_url = 2;
+  // Schema registry vendor, e.g. "confluent" or "apicurio".
+  string schema_registry_vendor = 3;
+}
+
+// Auth sets the authentication mechanism of a security scheme. The scheme
+// type is derived from it unless the scheme sets one.
+message Auth {
+  // Name of the (asyncapi.v3.document) security scheme.
+  string scheme = 1;
+  Mechanism mechanism = 2;
+}
+
+// Mechanism lists the Kafka authentication mechanisms.
+enum Mechanism {
+  MECHANISM_UNSPECIFIED = 0;
+  // SASL/PLAIN (security scheme type plain).
+  MECHANISM_PLAIN = 1;
+  // SASL/SCRAM-SHA-256 (scramSha256).
+  MECHANISM_SCRAM_SHA_256 = 2;
+  // SASL/SCRAM-SHA-512 (scramSha512).
+  MECHANISM_SCRAM_SHA_512 = 3;
+  // SASL/GSSAPI, Kerberos (gssapi).
+  MECHANISM_GSSAPI = 4;
+  // SASL/OAUTHBEARER. The security scheme must be an oauth2 or
+  // openIdConnect scheme with its flows or URL.
+  MECHANISM_OAUTHBEARER = 5;
+  // Mutual TLS (X509).
+  MECHANISM_MTLS = 6;
+}
+
+// Topic declares a topic and its configuration.
+message Topic {
+  // Topic name: 1 to 249 letters, digits, '.', '_' and '-'.
+  string name = 1;
+  // Number of partitions.
+  int32 partitions = 2;
+  // Replication factor.
+  int32 replicas = 3;
+  // cleanup.policy.
+  repeated CleanupPolicy cleanup_policy = 4;
+  // retention.ms, e.g. "168h"; "-1" keeps records forever.
+  string retention = 5;
+  // retention.bytes per partition; -1 for no limit.
+  int64 retention_bytes = 6;
+  // delete.retention.ms: how long tombstones of compacted topics are kept.
+  string delete_retention = 7;
+  // max.message.bytes: the largest record batch.
+  int32 max_message_bytes = 8;
+  // min.insync.replicas: replicas that must acknowledge acks=all writes.
+  int32 min_insync_replicas = 9;
+  // compression.type of stored records.
+  Compression compression = 10;
+  // confluent.key.schema.validation: brokers validate record keys against
+  // the schema registry.
+  bool key_schema_validation = 11;
+  // confluent.value.schema.validation.
+  bool value_schema_validation = 12;
+  // confluent.key.subject.name.strategy, e.g. "TopicNameStrategy".
+  string key_subject_name_strategy = 13;
+  // confluent.value.subject.name.strategy.
+  string value_subject_name_strategy = 14;
+  // Other topic configurations, e.g. {"segment.ms": "3600000"}.
+  map<string, string> configs = 15;
+  string description = 16;
+}
+
+// CleanupPolicy is a cleanup.policy value.
+enum CleanupPolicy {
+  CLEANUP_POLICY_UNSPECIFIED = 0;
+  // Deletes old segments.
+  CLEANUP_POLICY_DELETE = 1;
+  // Keeps the latest record of each key.
+  CLEANUP_POLICY_COMPACT = 2;
+}
+
+// Compression is a compression codec.
+enum Compression {
+  COMPRESSION_UNSPECIFIED = 0;
+  COMPRESSION_NONE = 1;
+  COMPRESSION_GZIP = 2;
+  COMPRESSION_SNAPPY = 3;
+  COMPRESSION_LZ4 = 4;
+  COMPRESSION_ZSTD = 5;
+  // Topics only: keep the producer's codec.
+  COMPRESSION_PRODUCER = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of a service.
+message Service {
+  // Prefix of the topic names of the service's rpcs, joined with '.'.
+  string topic_prefix = 1;
+  // Consumer group of the service's consumers.
+  string group_id = 2;
+  // client.id of the service's producers and consumers.
+  string client_id = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service consumes requests and produces each reply to reply_topic.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service produces records.
+  PATTERN_PUBLISH = 2;
+  // The service consumes records.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the Kafka operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Topic name, relative to the service's topic_prefix.
+  string topic = 2;
+  // Consumer group; defaults to the service's for its own consumers.
+  string group_id = 3;
+  // client.id; defaults to the service's.
+  string client_id = 4;
+  // Producer settings.
+  Produce produce = 5;
+  // Consumer settings.
+  Consume consume = 6;
+  // REQUEST_REPLY: topic replies are produced to (required), relative to
+  // the service's topic_prefix.
+  string reply_topic = 7;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 8;
+  // REQUEST_REPLY: header correlating replies with requests. Defaults to
+  // "correlation_id".
+  string correlation_header = 9;
+}
+
+// Produce holds producer settings.
+message Produce {
+  // acks: which replicas acknowledge a write.
+  Acks acks = 1;
+  // enable.idempotence: exactly-once writes per partition (requires
+  // acks=all).
+  bool idempotent = 2;
+  // transactional.id of a transactional producer (implies idempotence).
+  string transactional_id = 3;
+  // compression.type of produced batches.
+  Compression compression = 4;
+  // linger.ms, e.g. "5ms".
+  string linger = 5;
+  // batch.size in bytes.
+  int32 batch_size = 6;
+  // delivery.timeout.ms, e.g. "2m".
+  string delivery_timeout = 7;
+  // Partitioner, e.g. "murmur2" or a class name.
+  string partitioner = 8;
+}
+
+// Acks is the producer acks setting.
+enum Acks {
+  ACKS_UNSPECIFIED = 0;
+  // acks=0: fire and forget.
+  ACKS_NONE = 1;
+  // acks=1: the leader.
+  ACKS_LEADER = 2;
+  // acks=all: every in-sync replica.
+  ACKS_ALL = 3;
+}
+
+// Consume holds consumer settings.
+message Consume {
+  // auto.offset.reset: where a group without committed offsets starts.
+  OffsetReset auto_offset_reset = 1;
+  // isolation.level: read only committed transactional records.
+  bool read_committed = 2;
+  // enable.auto.commit.
+  bool auto_commit = 3;
+  // max.poll.records.
+  int32 max_poll_records = 4;
+  // session.timeout.ms, e.g. "45s".
+  string session_timeout = 5;
+  // max.poll.interval.ms, e.g. "5m".
+  string max_poll_interval = 6;
+  // partition.assignment.strategy.
+  AssignmentStrategy assignment_strategy = 7;
+  // group.instance.id for static membership, e.g. "worker-{hostname}".
+  string group_instance_id = 8;
+  // Use the consumer group protocol of KIP-848 (group.protocol=consumer).
+  bool next_gen_rebalance = 9;
+}
+
+// OffsetReset is the auto.offset.reset setting.
+enum OffsetReset {
+  OFFSET_RESET_UNSPECIFIED = 0;
+  OFFSET_RESET_EARLIEST = 1;
+  OFFSET_RESET_LATEST = 2;
+  // Fail when there is no committed offset.
+  OFFSET_RESET_NONE = 3;
+}
+
+// AssignmentStrategy is a partition.assignment.strategy.
+enum AssignmentStrategy {
+  ASSIGNMENT_STRATEGY_UNSPECIFIED = 0;
+  ASSIGNMENT_STRATEGY_RANGE = 1;
+  ASSIGNMENT_STRATEGY_ROUND_ROBIN = 2;
+  ASSIGNMENT_STRATEGY_STICKY = 3;
+  ASSIGNMENT_STRATEGY_COOPERATIVE_STICKY = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message holds Kafka properties of a message, and optionally gives it its
+// own topic, documented even when no rpc uses it.
+message Message {
+  // Topic of the message's own channel.
+  string topic = 1;
+  // Record key.
+  Key key = 2;
+  // Where the schema registry ID of the value is stored.
+  SchemaIdLocation schema_id_location = 3;
+  // How the schema ID is encoded in the payload, e.g. "confluent" (magic
+  // byte and 4-byte ID) or "apicurio-new".
+  string schema_id_payload_encoding = 4;
+  // Subject naming strategy of the value, e.g. "TopicNameStrategy" or
+  // "RecordNameStrategy".
+  string schema_lookup_strategy = 5;
+}
+
+// Key describes the record key.
+message Key {
+  oneof key {
+    // A field of the message is the key; its schema is the field's.
+    string field = 1;
+    // A Protobuf message (full name) is the key.
+    string message = 2;
+    // The key's schema as JSON, e.g. {"type": "string", "format": "uuid"}.
+    string schema = 3;
+  }
+  string description = 4;
+}
+
+// SchemaIdLocation is where records carry their schema registry ID.
+enum SchemaIdLocation {
+  SCHEMA_ID_LOCATION_UNSPECIFIED = 0;
+  SCHEMA_ID_LOCATION_PAYLOAD = 1;
+  SCHEMA_ID_LOCATION_HEADER = 2;
+}

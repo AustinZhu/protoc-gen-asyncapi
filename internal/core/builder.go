@@ -1046,6 +1046,12 @@ func (b *Builder) Schema(m *protogen.Message) (*asyncapi.Schema, error) {
 	return b.schemas.messageRef(m)
 }
 
+// FieldSchema returns the schema of a field, as it appears in its
+// message's schema.
+func (b *Builder) FieldSchema(f *protogen.Field) (*asyncapi.Schema, error) {
+	return b.schemas.fieldSchema(f)
+}
+
 // SetSchema stores a named component schema.
 func (b *Builder) SetSchema(name string, s *asyncapi.Schema) { b.schemas.schemas.Set(name, s) }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/core"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/googlepubsub"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/kafka"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
@@ -24,6 +25,7 @@ import "asyncapi/v3/annotations.proto";
 import "amqp/asyncapi/v1/annotations.proto";
 import "google/protobuf/empty.proto";
 import "googlepubsub/asyncapi/v1/annotations.proto";
+import "kafka/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -36,6 +38,7 @@ option (asyncapi.v3.document) = {
     {name: "redis", host: "redis:6379", protocol: "redis"},
     {name: "rabbitmq", host: "rabbitmq:5672", protocol: "amqp"},
     {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
+    {name: "kafka", host: "kafka:9092", protocol: "kafka"},
     {name: "temporal", host: "temporal:7233", protocol: "temporal"}
   ]
 };
@@ -80,6 +83,13 @@ service Clicks {
   option (asyncapi.v3.service) = {tags: [{name: "analytics"}]};
   // Tracks.
   rpc Track(google.protobuf.Empty) returns (stream M) { option (googlepubsub.asyncapi.v1.operation) = {}; }
+}
+
+// Ledger on Kafka.
+service Ledger {
+  option (asyncapi.v3.service) = {tags: [{name: "accounting"}]};
+  // Posts.
+  rpc Post(google.protobuf.Empty) returns (stream M) { option (kafka.asyncapi.v1.operation) = {}; }
 }
 
 message M { string id = 1; }
@@ -130,7 +140,7 @@ func (d tagDoc) infoTags() string {
 }
 
 func TestWithoutDefaultTags(t *testing.T) {
-	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks"
+	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks,Ledger"
 	for _, tc := range []struct {
 		param string
 		ops   map[string]string
@@ -149,6 +159,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Cache.expiry":       "Cache",
 				"Billing.Charge":     "Billing,payments",
 				"Clicks.Track":       "Clicks,analytics",
+				"Ledger.Post":        "Ledger,accounting",
 			},
 			info: withDefaults,
 		},
@@ -165,6 +176,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Cache.expiry":       "",
 				"Billing.Charge":     "payments",
 				"Clicks.Track":       "analytics",
+				"Ledger.Post":        "accounting",
 			},
 			info: "platform,Workflows,workflow:Run,Signals",
 		},
@@ -219,6 +231,7 @@ func TestWithoutDefaultTagsEveryPlugin(t *testing.T) {
 		{All, "Api.Get", "reads"},
 		{amqp.Plugin, "Billing.Charge", "payments"},
 		{googlepubsub.Plugin, "Clicks.Track", "analytics"},
+		{kafka.Plugin, "Ledger.Post", "accounting"},
 		{nats.Plugin, "Api.Get", "reads"},
 		{redis.Plugin, "Cache.Invalidate", "Cache"},
 		{temporal.Plugin, "workflow.Run", "Workflows"},

@@ -1,0 +1,136 @@
+// Inventory for the ACME shop, on Apache Kafka.
+//
+// Warehouses publish stock movements; the inventory service folds them into
+// a compacted topic holding the current stock level of every SKU, and
+// reserves stock for orders exactly once.
+syntax = "proto3";
+
+package acme.inventory.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "kafka/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Inventory"
+    version: "3.0.0"
+    contact: {
+      name: "Inventory team"
+      email: "inventory@acme.example"
+    }
+  }
+  id: "urn:acme:inventory"
+  servers: [
+    {
+      name: "production"
+      host: "kafka.acme.example:9093"
+      protocol: "kafka-secure"
+      description: "Kafka cluster."
+      security: ["scram"]
+    },
+    {
+      name: "local"
+      host: "localhost:9092"
+      description: "A local broker in KRaft mode."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "scram"
+      description: "SCRAM credentials of the inventory service."
+    }
+  ]
+};
+option (kafka.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      schema_registry_url: "https://schema-registry.acme.example"
+      schema_registry_vendor: "confluent"
+    }
+  ]
+  auth: [
+    {
+      scheme: "scram"
+      mechanism: MECHANISM_SCRAM_SHA_512
+    }
+  ]
+  topics: [
+    {
+      name: "inventory.movements"
+      partitions: 24
+      replicas: 3
+      min_insync_replicas: 2
+      retention: "720h"
+      description: "Stock movements reported by warehouses."
+    },
+    {
+      name: "inventory.stock-levels"
+      partitions: 24
+      replicas: 3
+      min_insync_replicas: 2
+      cleanup_policy: [CLEANUP_POLICY_COMPACT]
+      description: "The current stock level of every SKU."
+    }
+  ]
+};
+
+// Stock bookkeeping.
+service Inventory {
+  option (kafka.asyncapi.v1.service) = {
+    topic_prefix: "inventory"
+    group_id: "inventory"
+    client_id: "inventory-service"
+  };
+
+  // Folds stock movements into stock levels.
+  rpc Apply(StockMovement) returns (google.protobuf.Empty) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "movements"
+      consume: {
+        auto_offset_reset: OFFSET_RESET_EARLIEST
+        read_committed: true
+        max_poll_records: 500
+      }
+    };
+  }
+
+  // Publishes the new stock level of a SKU.
+  rpc StockLevels(google.protobuf.Empty) returns (stream StockLevel) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "stock-levels"
+      produce: {
+        acks: ACKS_ALL
+        transactional_id: "inventory-stock-levels"
+        compression: COMPRESSION_ZSTD
+      }
+    };
+  }
+}
+
+// A stock movement.
+message StockMovement {
+  option (kafka.asyncapi.v1.message) = {
+    key: {field: "sku"}
+  };
+
+  // Stock keeping unit.
+  string sku = 1;
+  string warehouse = 2;
+  // Positive for receipts, negative for shipments.
+  int32 quantity = 3;
+  google.protobuf.Timestamp moved_at = 4;
+}
+
+// The stock level of a SKU; the latest per SKU is kept.
+message StockLevel {
+  option (kafka.asyncapi.v1.message) = {
+    key: {field: "sku"}
+  };
+
+  string sku = 1;
+  int32 available = 2;
+  int32 reserved = 3;
+}

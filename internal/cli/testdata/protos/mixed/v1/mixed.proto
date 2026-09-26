@@ -1,6 +1,7 @@
 // Order processing that runs on Temporal, publishes events on NATS, queues
-// receipts on Redis and invoices on RabbitMQ, and exports analytics to Google
-// Pub/Sub: five protocols in one AsyncAPI document.
+// receipts on Redis and invoices on RabbitMQ, exports analytics to Google
+// Pub/Sub and streams order history to Kafka: six protocols in one AsyncAPI
+// document.
 syntax = "proto3";
 
 package mixed.v1;
@@ -9,6 +10,7 @@ import "amqp/asyncapi/v1/annotations.proto";
 import "asyncapi/v3/annotations.proto";
 import "google/protobuf/empty.proto";
 import "googlepubsub/asyncapi/v1/annotations.proto";
+import "kafka/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -20,7 +22,8 @@ option (asyncapi.v3.document) = {
     {name: "temporal", host: "temporal.example:7233", protocol: "temporal"},
     {name: "redis", host: "redis.example:6379", protocol: "redis"},
     {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"},
-    {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"}
+    {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
+    {name: "kafka", host: "kafka.example:9092", protocol: "kafka"}
   ]
 };
 
@@ -82,6 +85,16 @@ service Analytics {
   // Exports completed orders.
   rpc Export(google.protobuf.Empty) returns (stream OrderResult) {
     option (googlepubsub.asyncapi.v1.operation) = {topic: "orders.completed"};
+  }
+}
+
+// Order history, streamed to Kafka.
+service History {
+  option (asyncapi.v3.service) = {servers: ["kafka"]};
+
+  // Records completed orders.
+  rpc Record(google.protobuf.Empty) returns (stream OrderResult) {
+    option (kafka.asyncapi.v1.operation) = {topic: "orders.history"};
   }
 }
 

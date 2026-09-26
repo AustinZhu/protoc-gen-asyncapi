@@ -1,0 +1,249 @@
+// Payments on Apache Kafka.
+syntax = "proto3";
+
+package payments.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "kafka/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Payments"
+    version: "5.1.0"
+  }
+  servers: [
+    {
+      name: "production"
+      host: "kafka-1.acme.example:9093"
+      protocol: "kafka-secure"
+      security: ["scram"]
+    },
+    {
+      name: "internal"
+      host: "kafka-1.internal:9094"
+      protocol: "kafka-secure"
+      security: ["mtls"]
+    },
+    {
+      name: "cloud"
+      host: "pkc-1.eu-west-1.aws.confluent.cloud:9092"
+      protocol: "kafka-secure"
+      security: ["oauth"]
+    }
+  ]
+  security_schemes: [
+    {name: "scram"},
+    {name: "mtls"},
+    {
+      name: "oauth"
+      type: SECURITY_SCHEME_TYPE_OAUTH2
+      flows: {
+        client_credentials: {
+          token_url: "https://auth.acme.example/oauth2/token"
+          available_scopes: {
+            key: "kafka"
+            value: "Kafka access."
+          }
+        }
+      }
+    }
+  ]
+};
+option (kafka.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      schema_registry_url: "https://registry.acme.example"
+      schema_registry_vendor: "confluent"
+    }
+  ]
+  auth: [
+    {
+      scheme: "scram"
+      mechanism: MECHANISM_SCRAM_SHA_512
+    },
+    {
+      scheme: "mtls"
+      mechanism: MECHANISM_MTLS
+    },
+    {
+      scheme: "oauth"
+      mechanism: MECHANISM_OAUTHBEARER
+    }
+  ]
+  topics: [
+    {
+      name: "payments.transactions"
+      partitions: 12
+      replicas: 3
+      min_insync_replicas: 2
+      cleanup_policy: [CLEANUP_POLICY_DELETE]
+      retention: "168h"
+      retention_bytes: 107374182400
+      max_message_bytes: 1048588
+      compression: COMPRESSION_ZSTD
+      value_schema_validation: true
+      value_subject_name_strategy: "TopicNameStrategy"
+      configs: {
+        key: "segment.ms"
+        value: "3600000"
+      }
+      description: "Every payment transaction."
+    },
+    {
+      name: "payments.balances"
+      partitions: 6
+      replicas: 3
+      cleanup_policy: [CLEANUP_POLICY_COMPACT]
+      delete_retention: "24h"
+      key_schema_validation: true
+    },
+    {
+      name: "payments.audit"
+      retention: "-1"
+      compression: COMPRESSION_PRODUCER
+    }
+  ]
+};
+
+// The transaction ledger.
+service Ledger {
+  option (kafka.asyncapi.v1.service) = {
+    topic_prefix: "payments"
+    group_id: "ledger"
+    client_id: "ledger-service"
+  };
+
+  // Records transactions, exactly once.
+  rpc Record(google.protobuf.Empty) returns (stream Transaction) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "transactions"
+      produce: {
+        acks: ACKS_ALL
+        transactional_id: "ledger-tx"
+        compression: COMPRESSION_ZSTD
+        linger: "5ms"
+        batch_size: 65536
+        delivery_timeout: "2m"
+        partitioner: "murmur2"
+      }
+    };
+  }
+
+  // Settles transactions.
+  rpc Settle(Transaction) returns (google.protobuf.Empty) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "transactions"
+      consume: {
+        auto_offset_reset: OFFSET_RESET_EARLIEST
+        read_committed: true
+        max_poll_records: 500
+        session_timeout: "45s"
+        max_poll_interval: "5m"
+        assignment_strategy: ASSIGNMENT_STRATEGY_COOPERATIVE_STICKY
+        group_instance_id: "ledger-{hostname}"
+      }
+    };
+  }
+
+  // Publishes account balances.
+  rpc Balances(google.protobuf.Empty) returns (stream Balance) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "balances"
+      produce: {
+        acks: ACKS_ALL
+        idempotent: true
+      }
+    };
+  }
+
+  // Screens transactions for fraud, per region.
+  rpc Screen(Transaction) returns (google.protobuf.Empty) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "fraud.{region}"
+      group_id: "fraud"
+      consume: {next_gen_rebalance: true}
+    };
+  }
+}
+
+// Card authorization over request/reply topics.
+service Authorizer {
+  // Authorizes a card payment.
+  rpc Authorize(AuthRequest) returns (AuthResult) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "payments.auth.requests"
+      reply_topic: "payments.auth.replies"
+      reply_messages: ["payments.v1.AuthError"]
+      correlation_header: "kafka_correlationId"
+      group_id: "authorizer"
+    };
+  }
+}
+
+// A payment transaction.
+message Transaction {
+  option (kafka.asyncapi.v1.message) = {
+    key: {field: "transaction_id"}
+    schema_id_location: SCHEMA_ID_LOCATION_PAYLOAD
+    schema_id_payload_encoding: "confluent"
+    schema_lookup_strategy: "TopicNameStrategy"
+  };
+
+  // Unique transaction ID.
+  string transaction_id = 1;
+  string account_id = 2;
+  int64 amount_cents = 3;
+  // Region, e.g. "eu".
+  string region = 4;
+}
+
+// The balance of an account; the latest per account is kept.
+message Balance {
+  option (kafka.asyncapi.v1.message) = {
+    key: {
+      message: "payments.v1.AccountKey"
+      description: "The account."
+    }
+  };
+
+  int64 balance_cents = 1;
+}
+
+// Identifies an account.
+message AccountKey {
+  string account_id = 1;
+}
+
+message AuthRequest {
+  option (kafka.asyncapi.v1.message) = {
+    key: {
+      schema: '{"type": "string", "format": "uuid"}'
+      description: "Card token."
+    }
+  };
+
+  string card_token = 1;
+  int64 amount_cents = 2;
+}
+
+message AuthResult {
+  bool approved = 1;
+}
+
+// Error reply.
+message AuthError {
+  string reason = 1;
+}
+
+// An audit event, documented without an rpc.
+message AuditEvent {
+  option (kafka.asyncapi.v1.message) = {
+    topic: "payments.audit"
+    schema_id_location: SCHEMA_ID_LOCATION_HEADER
+  };
+
+  string actor = 1;
+  string action = 2;
+}

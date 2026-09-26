@@ -153,3 +153,13 @@ func decodeInto(src string, v *any) error {
 	*v = x
 	return nil
 }
+
+// DecodeSchema parses a schema given as JSON in an annotation; it must be a
+// valid AsyncAPI Schema Object.
+func DecodeSchema(what, src string) (*asyncapi.Schema, error) {
+	m, err := decodeSchema(what, src)
+	if err != nil {
+		return nil, err
+	}
+	return &asyncapi.Schema{Raw: m}, nil
+}

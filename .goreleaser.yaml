@@ -24,6 +24,10 @@ builds:
     main: ./cmd/protoc-gen-googlepubsub-asyncapi
     binary: protoc-gen-googlepubsub-asyncapi
   - <<: *build
+    id: protoc-gen-kafka-asyncapi
+    main: ./cmd/protoc-gen-kafka-asyncapi
+    binary: protoc-gen-kafka-asyncapi
+  - <<: *build
     id: protoc-gen-nats-asyncapi
     main: ./cmd/protoc-gen-nats-asyncapi
     binary: protoc-gen-nats-asyncapi
@@ -58,6 +62,10 @@ archives:
     id: protoc-gen-googlepubsub-asyncapi
     ids: [protoc-gen-googlepubsub-asyncapi]
     name_template: "protoc-gen-googlepubsub-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - <<: *archive
+    id: protoc-gen-kafka-asyncapi
+    ids: [protoc-gen-kafka-asyncapi]
+    name_template: "protoc-gen-kafka-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   - <<: *archive
     id: protoc-gen-nats-asyncapi
     ids: [protoc-gen-nats-asyncapi]

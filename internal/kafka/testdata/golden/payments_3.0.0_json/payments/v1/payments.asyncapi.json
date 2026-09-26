@@ -1,0 +1,603 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Payments",
+    "version": "5.1.0",
+    "description": "Payments on Apache Kafka.",
+    "tags": [
+      {
+        "name": "Ledger",
+        "description": "The transaction ledger."
+      },
+      {
+        "name": "Authorizer",
+        "description": "Card authorization over request/reply topics."
+      }
+    ]
+  },
+  "servers": {
+    "production": {
+      "host": "kafka-1.acme.example:9093",
+      "protocol": "kafka-secure",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/scram"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "schemaRegistryUrl": "https://registry.acme.example",
+          "schemaRegistryVendor": "confluent",
+          "bindingVersion": "0.5.0"
+        }
+      }
+    },
+    "internal": {
+      "host": "kafka-1.internal:9094",
+      "protocol": "kafka-secure",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/mtls"
+        }
+      ]
+    },
+    "cloud": {
+      "host": "pkc-1.eu-west-1.aws.confluent.cloud:9092",
+      "protocol": "kafka-secure",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/oauth"
+        }
+      ]
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "payments.transactions": {
+      "address": "payments.transactions",
+      "messages": {
+        "payments.v1.Transaction": {
+          "$ref": "#/components/messages/payments.v1.Transaction"
+        }
+      },
+      "description": "Every payment transaction.",
+      "bindings": {
+        "kafka": {
+          "partitions": 12,
+          "replicas": 3,
+          "topicConfiguration": {
+            "cleanup.policy": [
+              "delete"
+            ],
+            "retention.ms": 604800000,
+            "retention.bytes": 107374182400,
+            "max.message.bytes": 1048588,
+            "min.insync.replicas": 2,
+            "compression.type": "zstd",
+            "confluent.value.schema.validation": true,
+            "confluent.value.subject.name.strategy": "TopicNameStrategy",
+            "segment.ms": "3600000"
+          },
+          "bindingVersion": "0.5.0"
+        }
+      }
+    },
+    "payments.balances": {
+      "address": "payments.balances",
+      "messages": {
+        "payments.v1.Balance": {
+          "$ref": "#/components/messages/payments.v1.Balance"
+        }
+      },
+      "bindings": {
+        "kafka": {
+          "partitions": 6,
+          "replicas": 3,
+          "topicConfiguration": {
+            "cleanup.policy": [
+              "compact"
+            ],
+            "delete.retention.ms": 86400000,
+            "confluent.key.schema.validation": true
+          },
+          "bindingVersion": "0.5.0"
+        }
+      }
+    },
+    "payments.audit": {
+      "address": "payments.audit",
+      "messages": {
+        "payments.v1.AuditEvent": {
+          "$ref": "#/components/messages/payments.v1.AuditEvent"
+        }
+      },
+      "bindings": {
+        "kafka": {
+          "topicConfiguration": {
+            "retention.ms": -1,
+            "compression.type": "producer"
+          },
+          "bindingVersion": "0.5.0"
+        }
+      }
+    },
+    "payments.fraud.region": {
+      "address": "payments.fraud.{region}",
+      "messages": {
+        "payments.v1.Transaction": {
+          "$ref": "#/components/messages/payments.v1.Transaction"
+        }
+      },
+      "parameters": {
+        "region": {
+          "description": "Region, e.g. \"eu\".",
+          "location": "$message.payload#/region"
+        }
+      }
+    },
+    "payments.auth.requests": {
+      "address": "payments.auth.requests",
+      "messages": {
+        "payments.v1.AuthRequest": {
+          "$ref": "#/components/messages/payments.v1.AuthRequest"
+        }
+      }
+    },
+    "payments.auth.replies": {
+      "address": "payments.auth.replies",
+      "messages": {
+        "payments.v1.AuthResult": {
+          "$ref": "#/components/messages/payments.v1.AuthResult"
+        },
+        "payments.v1.AuthError": {
+          "$ref": "#/components/messages/payments.v1.AuthError"
+        }
+      }
+    }
+  },
+  "operations": {
+    "Ledger.Record": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/payments.transactions"
+      },
+      "summary": "Records transactions, exactly once.",
+      "tags": [
+        {
+          "name": "Ledger"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "clientId": {
+            "type": "string",
+            "enum": [
+              "ledger-service"
+            ]
+          },
+          "bindingVersion": "0.5.0",
+          "x-kafka": {
+            "acks": "all",
+            "enableIdempotence": true,
+            "transactionalId": "ledger-tx",
+            "compressionType": "zstd",
+            "lingerMs": 5,
+            "batchSize": 65536,
+            "deliveryTimeoutMs": 120000,
+            "partitioner": "murmur2"
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/payments.transactions/messages/payments.v1.Transaction"
+        }
+      ],
+      "x-protobuf-method": "payments.v1.Ledger.Record"
+    },
+    "Ledger.Settle": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/payments.transactions"
+      },
+      "summary": "Settles transactions.",
+      "tags": [
+        {
+          "name": "Ledger"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "groupId": {
+            "type": "string",
+            "enum": [
+              "ledger"
+            ]
+          },
+          "clientId": {
+            "type": "string",
+            "enum": [
+              "ledger-service"
+            ]
+          },
+          "bindingVersion": "0.5.0",
+          "x-kafka": {
+            "autoOffsetReset": "earliest",
+            "isolationLevel": "read_committed",
+            "maxPollRecords": 500,
+            "sessionTimeoutMs": 45000,
+            "maxPollIntervalMs": 300000,
+            "partitionAssignmentStrategy": "cooperative-sticky",
+            "groupInstanceId": "ledger-{hostname}"
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/payments.transactions/messages/payments.v1.Transaction"
+        }
+      ],
+      "x-protobuf-method": "payments.v1.Ledger.Settle"
+    },
+    "Ledger.Balances": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/payments.balances"
+      },
+      "summary": "Publishes account balances.",
+      "tags": [
+        {
+          "name": "Ledger"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "clientId": {
+            "type": "string",
+            "enum": [
+              "ledger-service"
+            ]
+          },
+          "bindingVersion": "0.5.0",
+          "x-kafka": {
+            "acks": "all",
+            "enableIdempotence": true
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/payments.balances/messages/payments.v1.Balance"
+        }
+      ],
+      "x-protobuf-method": "payments.v1.Ledger.Balances"
+    },
+    "Ledger.Screen": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/payments.fraud.region"
+      },
+      "summary": "Screens transactions for fraud, per region.",
+      "tags": [
+        {
+          "name": "Ledger"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "groupId": {
+            "type": "string",
+            "enum": [
+              "fraud"
+            ]
+          },
+          "clientId": {
+            "type": "string",
+            "enum": [
+              "ledger-service"
+            ]
+          },
+          "bindingVersion": "0.5.0",
+          "x-kafka": {
+            "groupProtocol": "consumer"
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/payments.fraud.region/messages/payments.v1.Transaction"
+        }
+      ],
+      "x-protobuf-method": "payments.v1.Ledger.Screen"
+    },
+    "Authorizer.Authorize": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/payments.auth.requests"
+      },
+      "summary": "Authorizes a card payment.",
+      "tags": [
+        {
+          "name": "Authorizer"
+        }
+      ],
+      "bindings": {
+        "kafka": {
+          "groupId": {
+            "type": "string",
+            "enum": [
+              "authorizer"
+            ]
+          },
+          "bindingVersion": "0.5.0"
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/payments.auth.requests/messages/payments.v1.AuthRequest"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/payments.auth.replies"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/payments.auth.replies/messages/payments.v1.AuthResult"
+          },
+          {
+            "$ref": "#/channels/payments.auth.replies/messages/payments.v1.AuthError"
+          }
+        ]
+      },
+      "x-protobuf-method": "payments.v1.Authorizer.Authorize"
+    }
+  },
+  "components": {
+    "schemas": {
+      "payments.v1.Transaction": {
+        "description": "A payment transaction.",
+        "type": "object",
+        "properties": {
+          "transactionId": {
+            "description": "Unique transaction ID.",
+            "type": "string"
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "amountCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?[0-9]+$"
+          },
+          "region": {
+            "description": "Region, e.g. \"eu\".",
+            "type": "string"
+          }
+        }
+      },
+      "payments.v1.Balance": {
+        "description": "The balance of an account; the latest per account is kept.",
+        "type": "object",
+        "properties": {
+          "balanceCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?[0-9]+$"
+          }
+        }
+      },
+      "payments.v1.AuthRequest": {
+        "type": "object",
+        "properties": {
+          "cardToken": {
+            "type": "string"
+          },
+          "amountCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?[0-9]+$"
+          }
+        }
+      },
+      "payments.v1.AuthResult": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        }
+      },
+      "payments.v1.AuthError": {
+        "description": "Error reply.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "payments.v1.AuditEvent": {
+        "description": "An audit event, documented without an rpc.",
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          }
+        }
+      },
+      "payments.v1.AccountKey": {
+        "description": "Identifies an account.",
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "messages": {
+      "payments.v1.Transaction": {
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.Transaction"
+        },
+        "name": "Transaction",
+        "summary": "A payment transaction.",
+        "bindings": {
+          "kafka": {
+            "key": {
+              "description": "Unique transaction ID.",
+              "type": "string"
+            },
+            "schemaIdLocation": "payload",
+            "schemaIdPayloadEncoding": "confluent",
+            "schemaLookupStrategy": "TopicNameStrategy",
+            "bindingVersion": "0.5.0"
+          }
+        },
+        "x-protobuf-message": "payments.v1.Transaction"
+      },
+      "payments.v1.Balance": {
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.Balance"
+        },
+        "name": "Balance",
+        "summary": "The balance of an account; the latest per account is kept.",
+        "bindings": {
+          "kafka": {
+            "key": {
+              "description": "The account.",
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/payments.v1.AccountKey"
+                }
+              ]
+            },
+            "bindingVersion": "0.5.0"
+          }
+        },
+        "x-protobuf-message": "payments.v1.Balance"
+      },
+      "payments.v1.AuthRequest": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "kafka_correlationId": {
+              "description": "Record header correlating a reply with its request.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kafka_correlationId"
+          ]
+        },
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.AuthRequest"
+        },
+        "correlationId": {
+          "description": "The kafka_correlationId header, copied from the request to its reply.",
+          "location": "$message.header#/kafka_correlationId"
+        },
+        "name": "AuthRequest",
+        "bindings": {
+          "kafka": {
+            "key": {
+              "description": "Card token.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "bindingVersion": "0.5.0"
+          }
+        },
+        "x-protobuf-message": "payments.v1.AuthRequest"
+      },
+      "payments.v1.AuthResult": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "kafka_correlationId": {
+              "description": "Record header correlating a reply with its request.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kafka_correlationId"
+          ]
+        },
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.AuthResult"
+        },
+        "correlationId": {
+          "description": "The kafka_correlationId header, copied from the request to its reply.",
+          "location": "$message.header#/kafka_correlationId"
+        },
+        "name": "AuthResult",
+        "x-protobuf-message": "payments.v1.AuthResult"
+      },
+      "payments.v1.AuthError": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "kafka_correlationId": {
+              "description": "Record header correlating a reply with its request.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kafka_correlationId"
+          ]
+        },
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.AuthError"
+        },
+        "correlationId": {
+          "description": "The kafka_correlationId header, copied from the request to its reply.",
+          "location": "$message.header#/kafka_correlationId"
+        },
+        "name": "AuthError",
+        "summary": "Error reply.",
+        "x-protobuf-message": "payments.v1.AuthError"
+      },
+      "payments.v1.AuditEvent": {
+        "payload": {
+          "$ref": "#/components/schemas/payments.v1.AuditEvent"
+        },
+        "name": "AuditEvent",
+        "summary": "An audit event, documented without an rpc.",
+        "bindings": {
+          "kafka": {
+            "schemaIdLocation": "header",
+            "bindingVersion": "0.5.0"
+          }
+        },
+        "x-protobuf-message": "payments.v1.AuditEvent"
+      }
+    },
+    "securitySchemes": {
+      "scram": {
+        "type": "scramSha512",
+        "x-kafka-mechanism": "SCRAM-SHA-512"
+      },
+      "mtls": {
+        "type": "X509",
+        "x-kafka-mechanism": "MTLS"
+      },
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://auth.acme.example/oauth2/token",
+            "availableScopes": {
+              "kafka": "Kafka access."
+            }
+          }
+        },
+        "x-kafka-mechanism": "OAUTHBEARER"
+      }
+    }
+  }
+}

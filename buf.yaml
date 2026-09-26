@@ -8,6 +8,8 @@ modules:
     name: buf.build/austin-zhu/asyncapi
   - path: proto/googlepubsub
     name: buf.build/austin-zhu/googlepubsub-asyncapi
+  - path: proto/kafka
+    name: buf.build/austin-zhu/kafka-asyncapi
   - path: proto/nats
     name: buf.build/austin-zhu/nats-asyncapi
   - path: proto/redis
@@ -16,6 +18,7 @@ modules:
     name: buf.build/austin-zhu/temporal-asyncapi
   - path: examples/amqp/proto
   - path: examples/googlepubsub/proto
+  - path: examples/kafka/proto
   - path: examples/nats/proto
   - path: examples/redis/proto
   - path: examples/temporal/proto
@@ -28,24 +31,28 @@ lint:
     RPC_REQUEST_RESPONSE_UNIQUE:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
+      - examples/kafka/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_REQUEST_STANDARD_NAME:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
+      - examples/kafka/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_RESPONSE_STANDARD_NAME:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
+      - examples/kafka/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     SERVICE_SUFFIX:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
+      - examples/kafka/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme

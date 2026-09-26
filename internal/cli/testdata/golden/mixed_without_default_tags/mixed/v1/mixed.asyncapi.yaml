@@ -6,8 +6,9 @@ info:
   version: 1.0.0
   description: |-
     Order processing that runs on Temporal, publishes events on NATS, queues
-    receipts on Redis and invoices on RabbitMQ, and exports analytics to Google
-    Pub/Sub: five protocols in one AsyncAPI document.
+    receipts on Redis and invoices on RabbitMQ, exports analytics to Google
+    Pub/Sub and streams order history to Kafka: six protocols in one AsyncAPI
+    document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -30,6 +31,9 @@ servers:
   pubsub:
     host: pubsub.googleapis.com:443
     protocol: googlepubsub
+  kafka:
+    host: kafka.example:9092
+    protocol: kafka
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -125,6 +129,13 @@ channels:
     bindings:
       x-googlepubsub:
         topic: orders.completed
+  orders.history:
+    address: orders.history
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/kafka'
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -188,6 +199,17 @@ operations:
     messages:
       - $ref: '#/channels/orders.completed/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.Analytics.Export
+  History.Record:
+    action: send
+    channel:
+      $ref: '#/channels/orders.history'
+    summary: Records completed orders.
+    bindings:
+      kafka:
+        bindingVersion: 0.5.0
+    messages:
+      - $ref: '#/channels/orders.history/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.History.Record
 components:
   schemas:
     mixed.v1.Order:
