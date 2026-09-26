@@ -16,6 +16,8 @@ modules:
     name: buf.build/austin-zhu/nats-asyncapi
   - path: proto/redis
     name: buf.build/austin-zhu/redis-asyncapi
+  - path: proto/sqs
+    name: buf.build/austin-zhu/sqs-asyncapi
   - path: proto/temporal
     name: buf.build/austin-zhu/temporal-asyncapi
   - path: examples/amqp/proto
@@ -24,6 +26,7 @@ modules:
   - path: examples/mqtt/proto
   - path: examples/nats/proto
   - path: examples/redis/proto
+  - path: examples/sqs/proto
   - path: examples/temporal/proto
 lint:
   use:
@@ -38,6 +41,7 @@ lint:
       - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
+      - examples/sqs/proto/acme
       - examples/temporal/proto/acme
     RPC_REQUEST_STANDARD_NAME:
       - examples/amqp/proto/acme
@@ -46,6 +50,7 @@ lint:
       - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
+      - examples/sqs/proto/acme
       - examples/temporal/proto/acme
     RPC_RESPONSE_STANDARD_NAME:
       - examples/amqp/proto/acme
@@ -54,6 +59,7 @@ lint:
       - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
+      - examples/sqs/proto/acme
       - examples/temporal/proto/acme
     SERVICE_SUFFIX:
       - examples/amqp/proto/acme
@@ -62,6 +68,7 @@ lint:
       - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
+      - examples/sqs/proto/acme
       - examples/temporal/proto/acme
 breaking:
   use:

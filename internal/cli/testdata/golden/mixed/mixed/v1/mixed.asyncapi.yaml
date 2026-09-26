@@ -7,8 +7,8 @@ info:
   description: |-
     Order processing that runs on Temporal, publishes events on NATS, queues
     receipts on Redis and invoices on RabbitMQ, exports analytics to Google
-    Pub/Sub, streams order history to Kafka and notifies the warehouse over
-    MQTT: seven protocols in one AsyncAPI document.
+    Pub/Sub, streams order history to Kafka, notifies the warehouse over MQTT
+    and queues returns on SQS: eight protocols in one AsyncAPI document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -28,6 +28,8 @@ info:
       description: Order history, streamed to Kafka.
     - name: Warehouse
       description: Warehouse notifications over MQTT.
+    - name: ReturnsQueue
+      description: Returns, queued on SQS.
 servers:
   nats:
     host: nats.example:4222
@@ -51,6 +53,9 @@ servers:
   mqtt:
     host: mqtt.example:1883
     protocol: mqtt
+  sqs:
+    host: sqs.eu-west-1.amazonaws.com
+    protocol: sqs
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -160,6 +165,19 @@ channels:
         $ref: '#/components/messages/mixed.v1.OrderResult'
     servers:
       - $ref: '#/servers/mqtt'
+  order-returns:
+    address: order-returns
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/sqs'
+    bindings:
+      sqs:
+        queue:
+          name: order-returns
+          fifoQueue: false
+        bindingVersion: 0.2.0
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -258,6 +276,21 @@ operations:
     messages:
       - $ref: '#/channels/warehouse.orders/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.Warehouse.Notify
+  ReturnsQueue.Handle:
+    action: receive
+    channel:
+      $ref: '#/channels/order-returns'
+    summary: Handles a return.
+    tags:
+      - name: ReturnsQueue
+    bindings:
+      sqs:
+        queues:
+          - name: order-returns
+        bindingVersion: 0.2.0
+    messages:
+      - $ref: '#/channels/order-returns/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.ReturnsQueue.Handle
 components:
   schemas:
     mixed.v1.Order:

@@ -17,6 +17,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/mqtt"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/sqs"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
 )
 
@@ -31,6 +32,7 @@ var importPaths = []string{
 	"../../proto/mqtt",
 	"../../proto/nats",
 	"../../proto/redis",
+	"../../proto/sqs",
 	"../../proto/temporal",
 	"../../examples/amqp/proto",
 	"../../examples/googlepubsub/proto",
@@ -38,6 +40,7 @@ var importPaths = []string{
 	"../../examples/mqtt/proto",
 	"../../examples/nats/proto",
 	"../../examples/redis/proto",
+	"../../examples/sqs/proto",
 	"../../examples/temporal/proto",
 }
 
@@ -51,7 +54,7 @@ func TestGolden(t *testing.T) {
 	}{
 		{"mixed", "", []string{"mixed/v1/mixed.proto"}},
 		{"mixed_without_default_tags", "without_default_tags=true", []string{"mixed/v1/mixed.proto"}},
-		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shipping/v1/shipping.proto", "acme/analytics/v1/analytics.proto", "acme/inventory/v1/inventory.proto", "acme/sensors/v1/sensors.proto", "acme/shop/v1/orders.proto"}},
+		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shipping/v1/shipping.proto", "acme/analytics/v1/analytics.proto", "acme/inventory/v1/inventory.proto", "acme/sensors/v1/sensors.proto", "acme/returns/v1/returns.proto", "acme/shop/v1/orders.proto"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +86,8 @@ func TestSingleProtocolPluginsIgnoreOthers(t *testing.T) {
 		{"nats without kafka", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "History"},
 		{"mqtt", golden.Run(mqtt.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Warehouse.Notify", "History.Record"},
 		{"nats without mqtt", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "Warehouse"},
+		{"sqs", golden.Run(sqs.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "ReturnsQueue.Handle", "Warehouse.Notify"},
+		{"nats without sqs", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "ReturnsQueue"},
 	} {
 		if tc.resp.Error != nil {
 			t.Fatalf("%s: %s", tc.name, tc.resp.GetError())

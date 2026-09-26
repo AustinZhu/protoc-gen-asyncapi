@@ -8,6 +8,7 @@ inputs:
   - directory: proto/mqtt
   - directory: proto/nats
   - directory: proto/redis
+  - directory: proto/sqs
   - directory: proto/temporal
 plugins:
   - local: protoc-gen-go

@@ -40,6 +40,10 @@ builds:
     main: ./cmd/protoc-gen-redis-asyncapi
     binary: protoc-gen-redis-asyncapi
   - <<: *build
+    id: protoc-gen-sqs-asyncapi
+    main: ./cmd/protoc-gen-sqs-asyncapi
+    binary: protoc-gen-sqs-asyncapi
+  - <<: *build
     id: protoc-gen-temporal-asyncapi
     main: ./cmd/protoc-gen-temporal-asyncapi
     binary: protoc-gen-temporal-asyncapi
@@ -82,6 +86,10 @@ archives:
     id: protoc-gen-redis-asyncapi
     ids: [protoc-gen-redis-asyncapi]
     name_template: "protoc-gen-redis-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - <<: *archive
+    id: protoc-gen-sqs-asyncapi
+    ids: [protoc-gen-sqs-asyncapi]
+    name_template: "protoc-gen-sqs-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   - <<: *archive
     id: protoc-gen-temporal-asyncapi
     ids: [protoc-gen-temporal-asyncapi]

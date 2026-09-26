@@ -8,6 +8,7 @@ inputs:
   - directory: examples/mqtt/proto
   - directory: examples/nats/proto
   - directory: examples/redis/proto
+  - directory: examples/sqs/proto
   - directory: examples/temporal/proto
 plugins:
   - local: ["go", "run", "-buildvcs=false", "./cmd/protoc-gen-asyncapi"]

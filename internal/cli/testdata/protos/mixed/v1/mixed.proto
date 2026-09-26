@@ -1,7 +1,7 @@
 // Order processing that runs on Temporal, publishes events on NATS, queues
 // receipts on Redis and invoices on RabbitMQ, exports analytics to Google
-// Pub/Sub, streams order history to Kafka and notifies the warehouse over
-// MQTT: seven protocols in one AsyncAPI document.
+// Pub/Sub, streams order history to Kafka, notifies the warehouse over MQTT
+// and queues returns on SQS: eight protocols in one AsyncAPI document.
 syntax = "proto3";
 
 package mixed.v1;
@@ -14,6 +14,7 @@ import "kafka/asyncapi/v1/annotations.proto";
 import "mqtt/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
+import "sqs/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
 
 option (asyncapi.v3.document) = {
@@ -25,7 +26,8 @@ option (asyncapi.v3.document) = {
     {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"},
     {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
     {name: "kafka", host: "kafka.example:9092", protocol: "kafka"},
-    {name: "mqtt", host: "mqtt.example:1883", protocol: "mqtt"}
+    {name: "mqtt", host: "mqtt.example:1883", protocol: "mqtt"},
+    {name: "sqs", host: "sqs.eu-west-1.amazonaws.com", protocol: "sqs"}
   ]
 };
 
@@ -107,6 +109,16 @@ service Warehouse {
   // Notifies the warehouse of completed orders.
   rpc Notify(google.protobuf.Empty) returns (stream OrderResult) {
     option (mqtt.asyncapi.v1.operation) = {topic: "warehouse/orders"};
+  }
+}
+
+// Returns, queued on SQS.
+service ReturnsQueue {
+  option (asyncapi.v3.service) = {servers: ["sqs"]};
+
+  // Handles a return.
+  rpc Handle(OrderResult) returns (google.protobuf.Empty) {
+    option (sqs.asyncapi.v1.operation) = {queue: "order-returns"};
   }
 }
 

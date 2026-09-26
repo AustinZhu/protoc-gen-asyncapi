@@ -8,6 +8,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/mqtt"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/sqs"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
 )
 
@@ -17,6 +18,6 @@ import (
 var All = core.Plugin{
 	Name: "protoc-gen-asyncapi",
 	Protocols: func() []core.Protocol {
-		return []core.Protocol{temporal.New(), redis.New(), amqp.New(), googlepubsub.New(), kafka.New(), mqtt.New(), nats.New()}
+		return []core.Protocol{temporal.New(), redis.New(), amqp.New(), googlepubsub.New(), kafka.New(), mqtt.New(), sqs.New(), nats.New()}
 	},
 }

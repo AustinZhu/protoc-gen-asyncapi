@@ -14,6 +14,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/mqtt"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/sqs"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
 )
 
@@ -30,6 +31,7 @@ import "kafka/asyncapi/v1/annotations.proto";
 import "mqtt/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
+import "sqs/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
 
 option (asyncapi.v3.document) = {
@@ -42,6 +44,7 @@ option (asyncapi.v3.document) = {
     {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
     {name: "kafka", host: "kafka:9092", protocol: "kafka"},
     {name: "mqtt", host: "mqtt:1883", protocol: "mqtt"},
+    {name: "sqs", host: "sqs.eu-west-1.amazonaws.com", protocol: "sqs"},
     {name: "temporal", host: "temporal:7233", protocol: "temporal"}
   ]
 };
@@ -102,6 +105,13 @@ service Sensors {
   rpc Read(google.protobuf.Empty) returns (stream M) { option (mqtt.asyncapi.v1.operation) = {}; }
 }
 
+// Jobs on SQS.
+service Jobs {
+  option (asyncapi.v3.service) = {tags: [{name: "batch"}]};
+  // Runs.
+  rpc Run(M) returns (google.protobuf.Empty) { option (sqs.asyncapi.v1.operation) = {}; }
+}
+
 message M { string id = 1; }
 `
 
@@ -150,7 +160,7 @@ func (d tagDoc) infoTags() string {
 }
 
 func TestWithoutDefaultTags(t *testing.T) {
-	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks,Ledger,Sensors"
+	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks,Ledger,Sensors,Jobs"
 	for _, tc := range []struct {
 		param string
 		ops   map[string]string
@@ -171,6 +181,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Clicks.Track":       "Clicks,analytics",
 				"Ledger.Post":        "Ledger,accounting",
 				"Sensors.Read":       "Sensors,iot",
+				"Jobs.Run":           "Jobs,batch",
 			},
 			info: withDefaults,
 		},
@@ -189,6 +200,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Clicks.Track":       "analytics",
 				"Ledger.Post":        "accounting",
 				"Sensors.Read":       "iot",
+				"Jobs.Run":           "batch",
 			},
 			info: "platform,Workflows,workflow:Run,Signals",
 		},
@@ -245,6 +257,7 @@ func TestWithoutDefaultTagsEveryPlugin(t *testing.T) {
 		{googlepubsub.Plugin, "Clicks.Track", "analytics"},
 		{kafka.Plugin, "Ledger.Post", "accounting"},
 		{mqtt.Plugin, "Sensors.Read", "iot"},
+		{sqs.Plugin, "Jobs.Run", "batch"},
 		{nats.Plugin, "Api.Get", "reads"},
 		{redis.Plugin, "Cache.Invalidate", "Cache"},
 		{temporal.Plugin, "workflow.Run", "Workflows"},

@@ -21,6 +21,7 @@ import (
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/mqtt/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1"
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/sqs/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/temporal/asyncapi/v1"
 )
 

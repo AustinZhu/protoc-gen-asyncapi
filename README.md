@@ -16,15 +16,16 @@ The repository is one shared core plus one package per protocol:
 | **MQTT** | `mqtt/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/mqtt-asyncapi`) | MQTT 3.1.1 and 5, using the official AsyncAPI MQTT bindings. Covers topics and wildcard filters, QoS, retained messages, message expiry, shared subscriptions and subscription options (retain handling, no local, retain as published), MQTT 5 request/response (response topic and correlation data), payload format and content type, client connections (client ID, clean start, keep alive, session expiry, last will, limits), and authentication. |
 | **NATS** | `nats/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/nats-asyncapi`) | Core NATS publish/subscribe, request/reply, queue groups, [NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services, JetStream streams and consumers, KV buckets and object stores. |
 | **Redis** | `redis/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/redis-asyncapi`) | Pub/Sub (plain, pattern and sharded), Streams with consumer groups, trimming, claiming and dead letters, Lists as FIFO, LIFO and reliable queues, keyspace and keyevent notifications, request/reply, and server details (topology, database, TLS, RESP, authentication). |
+| **Amazon SQS** | `sqs/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/sqs-asyncapi`) | Amazon SQS, using the official AsyncAPI SQS bindings. Covers standard and FIFO queues (deduplication, high throughput, delays, visibility, long polling, retention, size limits, encryption, access policies, tags), dead-letter queues with redrive and redrive-allow policies, sending (message group and deduplication IDs, delays, batches), receiving (batch size, long polling, visibility), request/reply over queues, and queue URLs and ARNs. |
 | **Temporal** | `temporal/asyncapi/v1/options.proto` (`buf.build/austin-zhu/temporal-asyncapi`) | [Temporal](https://temporal.io) Workflows, Activities, Signals, Queries and Updates, with task queues, timeouts, retry policies and continue-as-new. |
 
-Eight binaries are built from it:
+Nine binaries are built from it:
 
-- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, Google Pub/Sub, Kafka, MQTT, NATS,
-  Redis and Temporal services.
+- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, Amazon SQS, Google Pub/Sub, Kafka,
+  MQTT, NATS, Redis and Temporal services.
 - **`protoc-gen-amqp-asyncapi`**, **`protoc-gen-googlepubsub-asyncapi`**, **`protoc-gen-kafka-asyncapi`**,
-  **`protoc-gen-mqtt-asyncapi`**, **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and
-  **`protoc-gen-temporal-asyncapi`** document
+  **`protoc-gen-mqtt-asyncapi`**, **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`**,
+  **`protoc-gen-sqs-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document
   only their own protocol and ignore services annotated for another.
 
 The plugin generates documentation only. It generates no code and never contacts a server.
@@ -43,6 +44,7 @@ go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-amqp-asyncapi
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-googlepubsub-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-kafka-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-mqtt-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-sqs-asyncapi@latest
 ```
 
 Prebuilt binaries are attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-asyncapi/releases),
@@ -64,6 +66,7 @@ deps:
   - buf.build/austin-zhu/googlepubsub-asyncapi  # googlepubsub.asyncapi.v1
   - buf.build/austin-zhu/kafka-asyncapi      # kafka.asyncapi.v1
   - buf.build/austin-zhu/mqtt-asyncapi       # mqtt.asyncapi.v1
+  - buf.build/austin-zhu/sqs-asyncapi        # sqs.asyncapi.v1
   # pin a release with :v0.3.0
 ```
 
@@ -221,8 +224,29 @@ service Monitor {
 }
 ```
 
+An Amazon SQS service:
+
+```proto
+import "google/protobuf/empty.proto";
+import "sqs/asyncapi/v1/annotations.proto";
+
+option (sqs.asyncapi.v1.document) = {
+  region: "eu-west-1"
+  account_id: "123456789012"
+  queues: [{name: "returns.fifo", content_based_deduplication: true, dead_letter_queue: "returns-dlq.fifo", max_receive_count: 5}]
+};
+
+service Returns {
+  // Processes a return request.
+  rpc Process(ReturnRequested) returns (google.protobuf.Empty) {
+    option (sqs.asyncapi.v1.operation) = {queue: "returns.fifo", send: {message_group_id: "{order_id}"}};
+  }
+}
+```
+
 [`examples/`](examples) has a complete setup for every protocol and the documents it generates:
 [AMQP](examples/asyncapi/acme/shipping/v1/shipping.asyncapi.yaml),
+[Amazon SQS](examples/asyncapi/acme/returns/v1/returns.asyncapi.yaml),
 [Google Pub/Sub](examples/asyncapi/acme/analytics/v1/analytics.asyncapi.yaml),
 [Kafka](examples/asyncapi/acme/inventory/v1/inventory.asyncapi.yaml),
 [MQTT](examples/asyncapi/acme/sensors/v1/sensors.asyncapi.yaml),
@@ -535,6 +559,33 @@ generation with `file:line:column`. So do:
 - keep-alive or expiry intervals out of range;
 - a last will on a wildcard topic.
 
+## Amazon SQS
+
+The channel and operation bindings are the official AsyncAPI SQS bindings (0.2.0). What they don't define goes in
+`x-sqs` objects inside them. Server details go in an `x-sqs` server binding, because AsyncAPI reserves the `sqs`
+server binding.
+
+**Channels.** Each queue is a channel. Senders `send` to it and receivers `receive` from it; with `perspective=server`
+the documented service's side is used, and `perspective=client` flips it. Queue names default to
+`<package>-<service>-<rpc>`. A queue is FIFO when its name ends with `.fifo`.
+
+| Annotation | Renders as |
+| --- | --- |
+| `(sqs.asyncapi.v1.document)` `region`, `account_id` | Queue ARNs (in redrive policies) and, under `x-sqs`, queue URLs and ARNs; the servers' `x-sqs` region and account. |
+| `(sqs.asyncapi.v1.document).queues` | The channel binding's `queue` and `deadLetterQueue`. That covers `fifoQueue`, `deduplicationScope`, `fifoThroughputLimit`, `deliveryDelay`, `visibilityTimeout`, `receiveMessageWaitTime`, `messageRetentionPeriod`, `redrivePolicy`, `policy` and `tags`. Content-based deduplication, maximum message size, SSE-SQS or KMS encryption and the redrive-allow policy go under `x-sqs`. Declared queues are documented even without an rpc. |
+| `send` | `x-sqs`: `messageGroupId` and `messageDeduplicationId` templates (FIFO), per-message `delaySeconds` (standard) and batching. |
+| `receive` | `x-sqs`: `maxNumberOfMessages`, `waitTimeSeconds`, `visibilityTimeout` and batch deletes. |
+| `reply_queue` | Required for request/reply rpcs, since SQS has no replies. Replies are sent to this queue, correlated by a `correlation_id` message attribute. |
+
+Message attributes are message headers. Generation fails with `file:line:column` on settings SQS would reject, for
+example:
+- **Queues:** invalid queue names; attribute values outside SQS's ranges; a dead-letter queue that is the queue
+  itself or of the other type (FIFO or standard); both SSE-SQS and a KMS key; high throughput without message-group
+  deduplication.
+- **FIFO sending:** a FIFO send without a message group ID, or without a deduplication ID when the queue doesn't
+  deduplicate by content; per-message delays on FIFO queues.
+- **Request/reply:** request/reply without a reply queue.
+
 ## How Protobuf maps onto JSON Schema
 
 Schemas describe the canonical **Protobuf JSON** encoding.
@@ -605,7 +656,7 @@ Both overrides must be valid JSON Schema (draft-07). Generation fails with `file
 A protocol implements `core.Protocol` (`internal/core/builder.go`): it claims the services it understands and adds
 channels, messages and operations through `core.Builder`. The core handles everything else: documents, servers,
 security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp`, `internal/googlepubsub`, `internal/kafka`,
-`internal/mqtt` and `internal/nats`, then register
+`internal/mqtt`, `internal/sqs` and `internal/nats`, then register
 the protocol in `internal/cli/plugins.go` and give it an annotations module under `proto/`.
 
 ## Development
@@ -629,14 +680,14 @@ failure:
 
 1. Tests and spec validation, as in CI.
 2. For each of `proto/amqp`, `proto/asyncapi`, `proto/googlepubsub`, `proto/kafka`, `proto/mqtt`, `proto/nats`,
-   `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
+   `proto/redis`, `proto/sqs` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
-3. GoReleaser publishes the GitHub release and the eight binaries.
-4. The eight annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
+3. GoReleaser publishes the GitHub release and the nine binaries.
+4. The nine annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
    the `main` label, the BSR's default, so unpinned dependencies resolve to it. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the
-`BUF_TOKEN` bot user write access to those eight modules only. The token is passed to `buf push` through the
+`BUF_TOKEN` bot user write access to those nine modules only. The token is passed to `buf push` through the
 environment and is never logged or written to disk.

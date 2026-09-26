@@ -1,0 +1,252 @@
+// Amazon SQS annotations for protoc-gen-asyncapi (protoc-gen-sqs-asyncapi).
+//
+// These annotations carry only SQS concepts: standard and FIFO queues and
+// their attributes, dead-letter queues, access policies, sending and
+// receiving, and the region and account of the queues. Everything generic
+// (info, servers, security schemes, tags, summaries, examples, headers, ...)
+// uses the asyncapi.v3 annotations (asyncapi/v3/annotations.proto). Message
+// attributes are documented as message headers.
+//
+// The generated documents use the official AsyncAPI SQS bindings (0.2.0);
+// what they do not define is added as x-sqs extensions.
+//
+// A service only needs enough annotations to say "this is an SQS API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - send vs. receive vs. request/reply is inferred from the rpc shape, as
+//     documented on Pattern;
+//   - queue names default to "<package>-<service>-<method>", with the
+//     package's dots as dashes and names in snake_case;
+//   - a queue is FIFO when its name ends with ".fifo".
+//
+// Durations are strings in Go syntax, e.g. "30s", "15m", "96h".
+syntax = "proto3";
+
+package sqs.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/sqs/asyncapi/v1;sqsv1";
+
+extend google.protobuf.FileOptions {
+  // SQS specifics of the document: region, account, servers and queues.
+  Document document = 58380;
+}
+
+extend google.protobuf.ServiceOptions {
+  // SQS defaults applied to every rpc of the service.
+  Service service = 58380;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the SQS operation implemented by an rpc.
+  Operation operation = 58380;
+}
+
+extend google.protobuf.MessageOptions {
+  // Gives a message its own queue, documented even when no rpc uses it.
+  Message message = 58380;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the SQS specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // AWS region of the queues, e.g. "eu-west-1".
+  string region = 1;
+  // AWS account ID owning the queues, e.g. "123456789012".
+  string account_id = 2;
+  // SQS details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 3;
+  // Queues.
+  repeated Queue queues = 4;
+}
+
+// Server adds SQS details to a server declared with the asyncapi.v3
+// annotations, e.g. "sqs.eu-west-1.amazonaws.com" or a local emulator.
+// They are rendered as the server's x-sqs binding (AsyncAPI reserves the
+// sqs server binding).
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // Region; defaults to the document's.
+  string region = 2;
+  // Account ID; defaults to the document's.
+  string account_id = 3;
+}
+
+// Queue declares a queue and its attributes.
+message Queue {
+  // Queue name: up to 80 letters, digits, '-' and '_', with a ".fifo"
+  // suffix for FIFO queues.
+  string name = 1;
+  // FIFO queues: deduplicate by message body (ContentBasedDeduplication).
+  bool content_based_deduplication = 2;
+  // FIFO queues: DeduplicationScope.
+  DeduplicationScope deduplication_scope = 3;
+  // FIFO queues: FifoThroughputLimit.
+  FifoThroughputLimit fifo_throughput_limit = 4;
+  // DelaySeconds: delay of new messages, at most 15m.
+  string delivery_delay = 5;
+  // VisibilityTimeout: how long a received message is hidden, at most 12h.
+  string visibility_timeout = 6;
+  // ReceiveMessageWaitTimeSeconds: long polling wait, at most 20s.
+  string receive_wait_time = 7;
+  // MessageRetentionPeriod, 1m to 14 days (336h).
+  string message_retention = 8;
+  // MaximumMessageSize in bytes, 1 KiB to 1 MiB.
+  int32 maximum_message_size = 9;
+  // Dead-letter queue (name) receiving messages received too often.
+  string dead_letter_queue = 10;
+  // Receives before a message moves to the dead-letter queue, 1 to 1000.
+  // Defaults to 10.
+  int32 max_receive_count = 11;
+  // RedriveAllowPolicy: which queues may use this one as dead-letter
+  // queue.
+  RedriveAllow redrive_allow = 12;
+  // Server-side encryption with SQS-managed keys (SqsManagedSseEnabled).
+  bool sqs_managed_sse = 13;
+  // Server-side encryption with this KMS key (KmsMasterKeyId), e.g.
+  // "alias/aws/sqs".
+  string kms_key = 14;
+  // KmsDataKeyReusePeriodSeconds, 1m to 24h.
+  string kms_data_key_reuse = 15;
+  // Access policy.
+  repeated Statement policy = 16;
+  // Tags.
+  map<string, string> tags = 17;
+  string description = 18;
+}
+
+// DeduplicationScope is the scope of FIFO deduplication.
+enum DeduplicationScope {
+  DEDUPLICATION_SCOPE_UNSPECIFIED = 0;
+  DEDUPLICATION_SCOPE_QUEUE = 1;
+  DEDUPLICATION_SCOPE_MESSAGE_GROUP = 2;
+}
+
+// FifoThroughputLimit is the scope of the FIFO throughput quota.
+enum FifoThroughputLimit {
+  FIFO_THROUGHPUT_LIMIT_UNSPECIFIED = 0;
+  FIFO_THROUGHPUT_LIMIT_PER_QUEUE = 1;
+  // High throughput mode; requires message group deduplication.
+  FIFO_THROUGHPUT_LIMIT_PER_MESSAGE_GROUP_ID = 2;
+}
+
+// RedriveAllow is a RedriveAllowPolicy.
+message RedriveAllow {
+  RedrivePermission permission = 1;
+  // BY_QUEUE: names of the source queues allowed, at most 10.
+  repeated string source_queues = 2;
+}
+
+// RedrivePermission is the redrivePermission of a RedriveAllowPolicy.
+enum RedrivePermission {
+  REDRIVE_PERMISSION_UNSPECIFIED = 0;
+  REDRIVE_PERMISSION_ALLOW_ALL = 1;
+  REDRIVE_PERMISSION_DENY_ALL = 2;
+  REDRIVE_PERMISSION_BY_QUEUE = 3;
+}
+
+// Statement is a statement of a queue's access policy.
+message Statement {
+  Effect effect = 1;
+  // AWS accounts, IAM principals or service principals, e.g.
+  // "arn:aws:iam::123456789012:role/orders" or "sns.amazonaws.com".
+  repeated string principals = 2;
+  // Actions, e.g. "sqs:SendMessage".
+  repeated string actions = 3;
+}
+
+// Effect is the effect of a policy statement.
+enum Effect {
+  EFFECT_UNSPECIFIED = 0;
+  EFFECT_ALLOW = 1;
+  EFFECT_DENY = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of the service.
+message Service {
+  // Prefix of the queue names of the service's rpcs, joined with '-'.
+  string queue_prefix = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service receives requests and sends each reply to reply_queue.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service sends messages.
+  PATTERN_PUBLISH = 2;
+  // The service receives messages.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the SQS operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Queue name, after the service's queue_prefix.
+  string queue = 2;
+  // Sending settings.
+  Send send = 3;
+  // Receiving settings.
+  Receive receive = 4;
+  // REQUEST_REPLY: queue replies are sent to (required), after the
+  // service's queue_prefix. Requests and replies carry a correlation_id
+  // message attribute.
+  string reply_queue = 5;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 6;
+}
+
+// Send holds SendMessage settings.
+message Send {
+  // FIFO queues: MessageGroupId, e.g. "{customer_id}" (required).
+  string message_group_id = 1;
+  // FIFO queues: MessageDeduplicationId, e.g. "{order_id}" (required
+  // unless the queue deduplicates by content).
+  string deduplication_id = 2;
+  // Standard queues: DelaySeconds of each message, at most 15m.
+  string delay = 3;
+  // Send with SendMessageBatch.
+  bool batch = 4;
+}
+
+// Receive holds ReceiveMessage settings.
+message Receive {
+  // MaxNumberOfMessages, 1 to 10.
+  int32 max_messages = 1;
+  // WaitTimeSeconds: long polling wait, at most 20s.
+  string wait_time = 2;
+  // VisibilityTimeout of received messages, at most 12h.
+  string visibility_timeout = 3;
+  // Delete with DeleteMessageBatch.
+  bool batch_delete = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message gives a message its own queue.
+message Message {
+  // Queue name (no prefix applies).
+  string queue = 1;
+}

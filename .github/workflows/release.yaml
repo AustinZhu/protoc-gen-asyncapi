@@ -22,7 +22,7 @@ env:
   # The modules published to the BSR (their names are in buf.yaml): the
   # shared asyncapi.v3 annotations and each protocol's annotations. The
   # example modules are never published.
-  BSR_MODULE_PATHS: proto/amqp proto/asyncapi proto/googlepubsub proto/kafka proto/mqtt proto/nats proto/redis proto/temporal
+  BSR_MODULE_PATHS: proto/amqp proto/asyncapi proto/googlepubsub proto/kafka proto/mqtt proto/nats proto/redis proto/sqs proto/temporal
 
 jobs:
   prepare:

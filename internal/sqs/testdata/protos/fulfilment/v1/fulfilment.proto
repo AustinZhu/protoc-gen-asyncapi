@@ -1,0 +1,185 @@
+// Order fulfilment on Amazon SQS.
+syntax = "proto3";
+
+package fulfilment.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "sqs/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Fulfilment"
+    version: "1.8.0"
+  }
+  servers: [
+    {
+      name: "aws"
+      host: "sqs.eu-west-1.amazonaws.com"
+      protocol: "sqs"
+    },
+    {
+      name: "localstack"
+      host: "localhost:4566"
+      protocol: "sqs"
+    }
+  ]
+};
+option (sqs.asyncapi.v1.document) = {
+  region: "eu-west-1"
+  account_id: "123456789012"
+  servers: [
+    {name: "aws"},
+    {
+      name: "localstack"
+      region: "us-east-1"
+      account_id: "000000000000"
+    }
+  ]
+  queues: [
+    {
+      name: "orders.fifo"
+      deduplication_scope: DEDUPLICATION_SCOPE_MESSAGE_GROUP
+      fifo_throughput_limit: FIFO_THROUGHPUT_LIMIT_PER_MESSAGE_GROUP_ID
+      visibility_timeout: "5m"
+      receive_wait_time: "20s"
+      message_retention: "96h"
+      dead_letter_queue: "orders-dlq.fifo"
+      max_receive_count: 5
+      sqs_managed_sse: true
+      policy: [
+        {
+          effect: EFFECT_ALLOW
+          principals: ["sns.amazonaws.com"]
+          actions: ["sqs:SendMessage"]
+        },
+        {
+          effect: EFFECT_DENY
+          principals: [
+            "arn:aws:iam::123456789012:role/legacy",
+            "arn:aws:iam::123456789012:role/intern"
+          ]
+          actions: [
+            "sqs:PurgeQueue",
+            "sqs:DeleteQueue"
+          ]
+        }
+      ]
+      tags: {
+        key: "team"
+        value: "fulfilment"
+      }
+      description: "Orders awaiting fulfilment, in order per customer."
+    },
+    {
+      name: "orders-dlq.fifo"
+      message_retention: "336h"
+      redrive_allow: {
+        permission: REDRIVE_PERMISSION_BY_QUEUE
+        source_queues: ["orders.fifo"]
+      }
+    },
+    {
+      name: "emails"
+      delivery_delay: "30s"
+      maximum_message_size: 262144
+      kms_key: "alias/aws/sqs"
+      kms_data_key_reuse: "5m"
+      dead_letter_queue: "emails-dlq"
+      max_receive_count: 3
+    }
+  ]
+};
+
+// Order intake and fulfilment.
+service Orders {
+  // Submits orders, grouped per customer.
+  rpc Submit(google.protobuf.Empty) returns (stream OrderPlaced) {
+    option (sqs.asyncapi.v1.operation) = {
+      queue: "orders.fifo"
+      send: {
+        message_group_id: "{customer_id}"
+        deduplication_id: "{order_id}"
+        batch: true
+      }
+    };
+  }
+
+  // Fulfils orders.
+  rpc Fulfil(OrderPlaced) returns (google.protobuf.Empty) {
+    option (sqs.asyncapi.v1.operation) = {
+      queue: "orders.fifo"
+      send: {
+        message_group_id: "{customer_id}"
+        deduplication_id: "{order_id}"
+      }
+      receive: {
+        max_messages: 10
+        wait_time: "20s"
+        visibility_timeout: "10m"
+        batch_delete: true
+      }
+    };
+  }
+}
+
+// Transactional email.
+service Mail {
+  // Sends an email.
+  rpc Send(Email) returns (google.protobuf.Empty) {
+    option (sqs.asyncapi.v1.operation) = {
+      queue: "emails"
+      send: {delay: "5s"}
+    };
+  }
+}
+
+// Shipping labels, one queue per warehouse.
+service Labels {
+  option (sqs.asyncapi.v1.service) = {queue_prefix: "labels"};
+
+  // Prints a label.
+  rpc Print(LabelRequest) returns (LabelResult) {
+    option (sqs.asyncapi.v1.operation) = {
+      queue: "{warehouse}"
+      reply_queue: "replies"
+      reply_messages: ["fulfilment.v1.LabelError"]
+    };
+  }
+}
+
+// A placed order.
+message OrderPlaced {
+  string order_id = 1;
+  string customer_id = 2;
+  int64 total_cents = 3;
+}
+
+// An email.
+message Email {
+  string to = 1;
+  string template = 2;
+}
+
+message LabelRequest {
+  // Warehouse printing the label.
+  string warehouse = 1;
+  string order_id = 2;
+}
+
+message LabelResult {
+  string label_url = 1;
+}
+
+// Error reply.
+message LabelError {
+  string reason = 1;
+}
+
+// An audit event, documented without an rpc.
+message AuditEvent {
+  option (sqs.asyncapi.v1.message) = {queue: "audit-events"};
+
+  string actor = 1;
+  string action = 2;
+}
