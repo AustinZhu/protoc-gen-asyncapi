@@ -1,0 +1,153 @@
+// Shipping for the ACME shop, on RabbitMQ.
+//
+// Shipment events are published to the "shipping" topic exchange; the label
+// printers consume them from a quorum queue that dead-letters failures.
+// Checkout asks for shipping quotes over RPC.
+syntax = "proto3";
+
+package acme.shipping.v1;
+
+import "amqp/asyncapi/v1/annotations.proto";
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option (amqp.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      vhost: "shop"
+      tls: true
+      heartbeat: "30s"
+    }
+  ]
+  auth: [
+    {
+      scheme: "user"
+      mechanism: MECHANISM_PLAIN
+    }
+  ]
+  exchanges: [
+    {
+      name: "shipping"
+      type: EXCHANGE_TYPE_TOPIC
+      durable: true
+      description: "Shipment events."
+    },
+    {
+      name: "shipping.dlx"
+      type: EXCHANGE_TYPE_FANOUT
+      durable: true
+    }
+  ]
+  queues: [
+    {
+      name: "shipping.labels"
+      type: QUEUE_TYPE_QUORUM
+      delivery_limit: 3
+      dead_letter_exchange: "shipping.dlx"
+      description: "Shipments waiting for a label."
+    },
+    {
+      name: "shipping.failed"
+      durable: true
+      message_ttl: "168h"
+      bindings: [
+        {exchange: "shipping.dlx"}
+      ]
+      description: "Shipments whose label could not be printed."
+    }
+  ]
+};
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Shipping"
+    version: "2.1.0"
+    contact: {
+      name: "Logistics team"
+      email: "logistics@acme.example"
+    }
+  }
+  id: "urn:acme:shipping"
+  servers: [
+    {
+      name: "production"
+      host: "rabbitmq.acme.example:5671"
+      description: "RabbitMQ cluster."
+      security: ["user"]
+    },
+    {
+      name: "local"
+      host: "localhost:5672"
+      description: "`rabbitmq-server` on your machine."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "user"
+      description: "RabbitMQ user of the shipping service."
+    }
+  ]
+};
+
+// Shipment lifecycle events.
+service Shipments {
+  option (amqp.asyncapi.v1.service) = {
+    exchange: "shipping"
+    routing_key_prefix: "shipment"
+  };
+
+  // Published when a shipment is created, per carrier.
+  rpc Created(google.protobuf.Empty) returns (stream ShipmentCreated) {
+    option (amqp.asyncapi.v1.operation) = {
+      routing_key: "created.{carrier}"
+      publish: {
+        delivery_mode: DELIVERY_MODE_PERSISTENT
+        mandatory: true
+        confirm: true
+      }
+    };
+  }
+
+  // Prints the label of every new shipment.
+  rpc PrintLabel(ShipmentCreated) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {
+      routing_key: "created.*"
+      queue: "shipping.labels"
+      consume: {prefetch: 5}
+    };
+  }
+}
+
+// Shipping quotes for checkout.
+service Quotes {
+  // Quotes the cheapest carrier for a parcel.
+  rpc Quote(QuoteRequest) returns (QuoteResponse) {
+    option (amqp.asyncapi.v1.operation) = {
+      queue: "shipping.quotes"
+      publish: {expiration: "10s"}
+    };
+  }
+}
+
+// A new shipment.
+message ShipmentCreated {
+  string shipment_id = 1;
+  // Carrier code, e.g. "ups".
+  string carrier = 2;
+  string order_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// A parcel to quote.
+message QuoteRequest {
+  string destination_country = 1;
+  // Weight in grams.
+  uint32 weight_g = 2;
+}
+
+// The cheapest quote.
+message QuoteResponse {
+  string carrier = 1;
+  int64 price_cents = 2;
+}

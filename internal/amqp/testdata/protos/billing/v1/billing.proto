@@ -1,0 +1,303 @@
+// Billing on RabbitMQ.
+syntax = "proto3";
+
+package billing.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "amqp/asyncapi/v1/annotations.proto";
+import "google/protobuf/empty.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Billing"
+    version: "3.2.0"
+  }
+  servers: [
+    {
+      name: "production"
+      host: "rabbitmq.acme.example:5671"
+      security: ["password"]
+    },
+    {
+      name: "mtls"
+      host: "rabbitmq.acme.example:5671"
+      security: ["cert"]
+    }
+  ]
+  security_schemes: [
+    {name: "password"},
+    {name: "cert"}
+  ]
+};
+option (amqp.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      vhost: "billing"
+      tls: true
+      heartbeat: "60s"
+      frame_max: 131072
+      channel_max: 2047
+    }
+  ]
+  auth: [
+    {
+      scheme: "password"
+      mechanism: MECHANISM_PLAIN
+    },
+    {
+      scheme: "cert"
+      mechanism: MECHANISM_EXTERNAL
+    }
+  ]
+  exchanges: [
+    {
+      name: "billing"
+      type: EXCHANGE_TYPE_TOPIC
+      durable: true
+      alternate_exchange: "billing.unrouted"
+      description: "Billing events."
+    },
+    {
+      name: "billing.unrouted"
+      type: EXCHANGE_TYPE_FANOUT
+      durable: true
+    },
+    {
+      name: "billing.dlx"
+      type: EXCHANGE_TYPE_DIRECT
+      durable: true
+    },
+    {
+      name: "audit"
+      type: EXCHANGE_TYPE_FANOUT
+      durable: true
+      internal: true
+    },
+    {
+      name: "billing.delayed"
+      type: EXCHANGE_TYPE_DIRECT
+      durable: true
+      delayed: true
+      arguments: {
+        key: "x-delayed-type"
+        value: "\"direct\""
+      }
+    },
+    {
+      name: "billing.headers"
+      type: EXCHANGE_TYPE_HEADERS
+    }
+  ]
+  exchange_bindings: [
+    {
+      source: "billing"
+      destination: "audit"
+      routing_key: "#"
+    }
+  ]
+  queues: [
+    {
+      name: "invoices"
+      type: QUEUE_TYPE_QUORUM
+      delivery_limit: 5
+      dead_letter_exchange: "billing.dlx"
+      dead_letter_routing_key: "invoices"
+      message_ttl: "24h"
+      description: "Issued invoices awaiting processing."
+      bindings: [
+        {
+          exchange: "billing"
+          routing_key: "invoices.issued.*"
+        }
+      ]
+    },
+    {
+      name: "billing.audit"
+      type: QUEUE_TYPE_STREAM
+      max_age: "168h"
+      max_length_bytes: 10737418240
+      bindings: [
+        {exchange: "audit"}
+      ]
+    },
+    {
+      name: "payments.priority"
+      durable: true
+      max_priority: 10
+      max_length: 10000
+      overflow: OVERFLOW_REJECT_PUBLISH
+      single_active_consumer: true
+    },
+    {
+      name: "billing.unrouted"
+      durable: true
+      expires: "72h"
+      bindings: [
+        {exchange: "billing.unrouted"}
+      ]
+      arguments: {
+        key: "x-queue-mode"
+        value: "\"lazy\""
+      }
+    },
+    {
+      name: "billing.eu"
+      bindings: [
+        {
+          exchange: "billing.headers"
+          match: MATCH_ANY
+          headers: {
+            key: "region"
+            value: "\"eu\""
+          }
+          headers: {
+            key: "vat"
+            value: "true"
+          }
+        }
+      ]
+    }
+  ]
+};
+
+// Invoice events.
+service Invoices {
+  option (amqp.asyncapi.v1.service) = {
+    exchange: "billing"
+    routing_key_prefix: "invoices"
+    prefetch: 20
+  };
+
+  // Publishes issued invoices.
+  rpc Issued(google.protobuf.Empty) returns (stream InvoiceIssued) {
+    option (amqp.asyncapi.v1.operation) = {
+      routing_key: "issued.{region}"
+      queue: "invoices"
+      publish: {
+        mandatory: true
+        delivery_mode: DELIVERY_MODE_PERSISTENT
+        expiration: "1h"
+        cc: ["audit.invoices"]
+        bcc: ["compliance.invoices"]
+        timestamp: true
+        user_id: "billing"
+        app_id: "billing-service"
+        confirm: true
+      }
+    };
+  }
+
+  // Processes issued invoices of any region.
+  rpc Process(InvoiceIssued) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {
+      routing_key: "issued.*"
+      queue: "invoices"
+      consume: {
+        prefetch: 10
+        consumer_tag: "invoice-processor"
+        priority: 5
+      }
+    };
+  }
+
+  // Replays the audit stream from the beginning.
+  rpc Audit(InvoiceIssued) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {
+      exchange: "billing"
+      routing_key: "audited"
+      queue: "billing.audit"
+      consume: {
+        stream_offset: "first"
+        prefetch: 100
+      }
+    };
+  }
+
+  // Handles European invoices, routed by headers.
+  rpc Europe(InvoiceIssued) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {
+      exchange: "billing.headers"
+      routing_key: ""
+      queue: "billing.eu"
+      consume: {
+        auto_ack: true
+        exclusive: true
+      }
+    };
+  }
+}
+
+// Payments over RPC.
+service Payments {
+  // Charges a card; answered through direct reply-to.
+  rpc Charge(ChargeRequest) returns (ChargeResult) {
+    option (amqp.asyncapi.v1.operation) = {reply_messages: ["billing.v1.PaymentError"]};
+  }
+
+  // Refunds a charge; urgent refunds jump the queue.
+  rpc Refund(RefundRequest) returns (RefundResult) {
+    option (amqp.asyncapi.v1.operation) = {
+      queue: "payments.priority"
+      reply_queue: "payments.replies"
+      publish: {priority: 7}
+    };
+  }
+
+  // Sends payment reminders after a delay.
+  rpc Remind(Reminder) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {
+      exchange: "billing.delayed"
+      routing_key: "reminders"
+      queue: "billing.reminders"
+      publish: {delay: "15m"}
+    };
+  }
+}
+
+// An issued invoice.
+message InvoiceIssued {
+  string invoice_id = 1;
+  // Billing region, e.g. "eu".
+  string region = 2;
+  int64 amount_cents = 3;
+}
+
+// Published when an invoice is voided; documented without an rpc.
+message InvoiceVoided {
+  option (amqp.asyncapi.v1.message) = {
+    exchange: "billing"
+    routing_key: "invoices.voided"
+    type: "invoice.voided"
+    content_encoding: "gzip"
+  };
+
+  string invoice_id = 1;
+}
+
+message ChargeRequest {
+  string card_token = 1;
+  int64 amount_cents = 2;
+}
+
+message ChargeResult {
+  string charge_id = 1;
+}
+
+message RefundRequest {
+  string charge_id = 1;
+}
+
+message RefundResult {
+  bool refunded = 1;
+}
+
+// Error reply.
+message PaymentError {
+  string code = 1;
+  string message = 2;
+}
+
+message Reminder {
+  string invoice_id = 1;
+}

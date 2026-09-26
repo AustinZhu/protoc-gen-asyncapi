@@ -2,6 +2,8 @@
 # examples. See .github/workflows/release.yaml for publishing.
 version: v2
 modules:
+  - path: proto/amqp
+    name: buf.build/austin-zhu/amqp-asyncapi
   - path: proto/asyncapi
     name: buf.build/austin-zhu/asyncapi
   - path: proto/nats
@@ -10,6 +12,7 @@ modules:
     name: buf.build/austin-zhu/redis-asyncapi
   - path: proto/temporal
     name: buf.build/austin-zhu/temporal-asyncapi
+  - path: examples/amqp/proto
   - path: examples/nats/proto
   - path: examples/redis/proto
   - path: examples/temporal/proto
@@ -20,18 +23,22 @@ lint:
     # Payloads are named after their operation (…Input / …Result, events)
     # and many operations take or return google.protobuf.Empty.
     RPC_REQUEST_RESPONSE_UNIQUE:
+      - examples/amqp/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_REQUEST_STANDARD_NAME:
+      - examples/amqp/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     RPC_RESPONSE_STANDARD_NAME:
+      - examples/amqp/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
     SERVICE_SUFFIX:
+      - examples/amqp/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme

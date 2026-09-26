@@ -1,0 +1,384 @@
+// AMQP 0-9-1 (RabbitMQ) annotations for protoc-gen-asyncapi
+// (protoc-gen-amqp-asyncapi).
+//
+// These annotations carry only AMQP concepts: exchanges, queues and the
+// bindings between them, publishing and consuming, request/reply, and AMQP
+// specifics of servers and authentication. Everything generic (info,
+// servers, security schemes, tags, summaries, examples, headers, ...) uses
+// the asyncapi.v3 annotations (asyncapi/v3/annotations.proto).
+//
+// The generated documents use the official AsyncAPI AMQP bindings (0.3.0).
+// RabbitMQ features the bindings do not cover (queue types and arguments,
+// bindings, prefetch, streams, ...) are added to them as x-rabbitmq
+// extensions.
+//
+// A service only needs enough annotations to say "this is an AMQP API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - request/reply vs. publish vs. subscribe is inferred from the rpc shape,
+//     as documented on Pattern;
+//   - routing keys default to "<package>.<service>.<method>" in snake_case,
+//     published to the default exchange, which delivers to the queue of the
+//     same name;
+//   - `{name}` placeholders in routing keys are AsyncAPI channel parameters,
+//     bound to payload fields with the same name. Queues bound to them match
+//     any word ("*").
+//
+// Durations are strings in Go syntax, e.g. "500ms", "30s", "24h".
+syntax = "proto3";
+
+package amqp.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/amqp/asyncapi/v1;amqpv1";
+
+extend google.protobuf.FileOptions {
+  // AMQP specifics of the document: server and authentication details and
+  // the declared topology (exchanges, queues and bindings).
+  Document document = 58340;
+}
+
+extend google.protobuf.ServiceOptions {
+  // AMQP defaults applied to every rpc of the service.
+  Service service = 58340;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the AMQP operation implemented by an rpc.
+  Operation operation = 58340;
+}
+
+extend google.protobuf.MessageOptions {
+  // AMQP properties of a message, and optionally its own channel.
+  Message message = 58340;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the AMQP specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // AMQP details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 1;
+  // Authentication mechanism of security schemes declared in
+  // (asyncapi.v3.document).security_schemes.
+  repeated Auth auth = 2;
+  // Exchanges of the topology.
+  repeated Exchange exchanges = 3;
+  // Queues of the topology, with their bindings.
+  repeated Queue queues = 4;
+  // Exchange-to-exchange bindings.
+  repeated ExchangeBinding exchange_bindings = 5;
+}
+
+// Server adds AMQP details to a server declared with the asyncapi.v3
+// annotations. They are rendered as the server's x-amqp binding (AsyncAPI
+// reserves the amqp server binding).
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // Default virtual host of the server's exchanges and queues. Defaults to
+  // "/".
+  string vhost = 2;
+  // Connections use TLS (amqps).
+  bool tls = 3;
+  // Heartbeat timeout requested by clients, e.g. "60s".
+  string heartbeat = 4;
+  // Maximum frame size in bytes (frame_max).
+  uint32 frame_max = 5;
+  // Maximum number of channels per connection (channel_max).
+  uint32 channel_max = 6;
+}
+
+// Auth sets the SASL mechanism of a security scheme. The scheme type is
+// derived from it unless the scheme sets one.
+message Auth {
+  // Name of the (asyncapi.v3.document) security scheme.
+  string scheme = 1;
+  // SASL mechanism.
+  Mechanism mechanism = 2;
+}
+
+// Mechanism lists the SASL mechanisms of RabbitMQ.
+enum Mechanism {
+  MECHANISM_UNSPECIFIED = 0;
+  // PLAIN: username and password.
+  MECHANISM_PLAIN = 1;
+  // AMQPLAIN: username and password (legacy).
+  MECHANISM_AMQPLAIN = 2;
+  // EXTERNAL: the TLS client certificate identifies the user.
+  MECHANISM_EXTERNAL = 3;
+}
+
+// Exchange declares an exchange.
+message Exchange {
+  // Exchange name. The default exchange ("") is always available.
+  string name = 1;
+  // Exchange type.
+  ExchangeType type = 2;
+  // Survives broker restarts.
+  bool durable = 3;
+  // Deleted when its last queue is unbound.
+  bool auto_delete = 4;
+  // Only reachable through exchange-to-exchange bindings, not by
+  // publishers.
+  bool internal = 5;
+  // Virtual host; defaults to the server's.
+  string vhost = 6;
+  // Alternate exchange receiving messages this one cannot route.
+  string alternate_exchange = 7;
+  // Delayed-message exchange (rabbitmq_delayed_message_exchange): type is
+  // the routing type of the delayed messages, and publishers set a delay.
+  bool delayed = 8;
+  // Other declaration arguments as JSON values, e.g. {"x-foo": "1"}.
+  map<string, string> arguments = 9;
+  string description = 10;
+}
+
+// ExchangeType is the routing algorithm of an exchange.
+enum ExchangeType {
+  // DIRECT.
+  EXCHANGE_TYPE_UNSPECIFIED = 0;
+  // Routes to queues whose binding key equals the routing key.
+  EXCHANGE_TYPE_DIRECT = 1;
+  // Routes to every bound queue.
+  EXCHANGE_TYPE_FANOUT = 2;
+  // Routes by pattern: "*" matches one word, "#" zero or more.
+  EXCHANGE_TYPE_TOPIC = 3;
+  // Routes by message headers (x-match all or any).
+  EXCHANGE_TYPE_HEADERS = 4;
+}
+
+// Queue declares a queue.
+message Queue {
+  // Queue name.
+  string name = 1;
+  // Queue type.
+  QueueType type = 2;
+  // Survives broker restarts. Quorum and stream queues are always durable.
+  bool durable = 3;
+  // Used by one connection only, and deleted when it closes.
+  bool exclusive = 4;
+  // Deleted when its last consumer unsubscribes.
+  bool auto_delete = 5;
+  // Virtual host; defaults to the server's.
+  string vhost = 6;
+  // How long messages may stay in the queue (x-message-ttl).
+  string message_ttl = 7;
+  // Deleted after being unused this long (x-expires).
+  string expires = 8;
+  // Maximum number of ready messages (x-max-length).
+  int64 max_length = 9;
+  // Maximum size of ready messages in bytes (x-max-length-bytes).
+  int64 max_length_bytes = 10;
+  // What happens when the queue is full (x-overflow).
+  Overflow overflow = 11;
+  // Exchange receiving dead-lettered messages (x-dead-letter-exchange).
+  string dead_letter_exchange = 12;
+  // Routing key of dead-lettered messages (x-dead-letter-routing-key).
+  string dead_letter_routing_key = 13;
+  // Highest message priority, 1 to 255 (x-max-priority). Classic queues
+  // only.
+  int32 max_priority = 14;
+  // Only one consumer receives messages at a time
+  // (x-single-active-consumer).
+  bool single_active_consumer = 15;
+  // Deliveries before a message is dropped or dead-lettered
+  // (x-delivery-limit). Quorum queues only.
+  int32 delivery_limit = 16;
+  // Retention of stream queues (x-max-age), e.g. "168h".
+  string max_age = 17;
+  // Bindings of the queue to exchanges.
+  repeated Binding bindings = 18;
+  // Other declaration arguments as JSON values.
+  map<string, string> arguments = 19;
+  string description = 20;
+}
+
+// QueueType is the RabbitMQ queue type (x-queue-type).
+enum QueueType {
+  // CLASSIC.
+  QUEUE_TYPE_UNSPECIFIED = 0;
+  QUEUE_TYPE_CLASSIC = 1;
+  // Replicated, durable queues (Raft).
+  QUEUE_TYPE_QUORUM = 2;
+  // Append-only, replayable logs.
+  QUEUE_TYPE_STREAM = 3;
+}
+
+// Overflow is the behaviour of a full queue.
+enum Overflow {
+  // DROP_HEAD.
+  OVERFLOW_UNSPECIFIED = 0;
+  // Drops the oldest messages.
+  OVERFLOW_DROP_HEAD = 1;
+  // Rejects new messages.
+  OVERFLOW_REJECT_PUBLISH = 2;
+  // Rejects new messages and dead-letters them.
+  OVERFLOW_REJECT_PUBLISH_DLX = 3;
+}
+
+// Binding binds a queue to an exchange.
+message Binding {
+  // Source exchange.
+  string exchange = 1;
+  // Binding key; topic exchanges accept "*" and "#".
+  string routing_key = 2;
+  // Headers exchanges: how the headers must match.
+  Match match = 3;
+  // Headers exchanges: the header values to match, as JSON values.
+  map<string, string> headers = 4;
+}
+
+// Match is the x-match argument of headers exchange bindings.
+enum Match {
+  // ALL.
+  MATCH_UNSPECIFIED = 0;
+  MATCH_ALL = 1;
+  MATCH_ANY = 2;
+}
+
+// ExchangeBinding binds an exchange to another one.
+message ExchangeBinding {
+  string source = 1;
+  string destination = 2;
+  string routing_key = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of a service.
+message Service {
+  // Exchange the service's messages are published to; defaults to the
+  // default exchange ("").
+  string exchange = 1;
+  // Prefix of the routing keys of the service's rpcs, joined with '.'.
+  string routing_key_prefix = 2;
+  // Queue the service consumes from, for rpcs without their own.
+  string queue = 3;
+  // Consumer prefetch (basic.qos) of the service's consumers.
+  int32 prefetch = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service consumes requests and answers each one on the reply_to
+  // queue of the request (RPC).
+  PATTERN_REQUEST_REPLY = 1;
+  // The service publishes messages.
+  PATTERN_PUBLISH = 2;
+  // The service consumes messages.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the AMQP operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Exchange messages are published to; defaults to the service's.
+  string exchange = 2;
+  // Routing key, relative to the service's routing_key_prefix. Consumers
+  // may use binding patterns ("*" and "#") on topic exchanges.
+  string routing_key = 3;
+  // Queue the consumer reads from. Defaults to the service's queue, or, on
+  // the default exchange, to the queue named after the routing key. The
+  // queue is bound to the exchange with the routing key unless a declared
+  // queue already has bindings.
+  string queue = 4;
+  // Publishing properties.
+  Publish publish = 5;
+  // Consuming settings.
+  Consume consume = 6;
+  // REQUEST_REPLY: queue replies are sent to (through the default
+  // exchange). Defaults to RabbitMQ's direct reply-to
+  // ("amq.rabbitmq.reply-to").
+  string reply_queue = 7;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 8;
+}
+
+// Publish holds basic.publish flags and message properties set by
+// publishers.
+message Publish {
+  // Returned to the publisher when no queue receives it.
+  bool mandatory = 1;
+  // Delivery mode.
+  DeliveryMode delivery_mode = 2;
+  // Message priority, 0 to 255.
+  int32 priority = 3;
+  // Per-message TTL (expiration), e.g. "30s".
+  string expiration = 4;
+  // Additional routing keys (CC header), visible to consumers.
+  repeated string cc = 5;
+  // Additional routing keys (BCC header), hidden from consumers.
+  repeated string bcc = 6;
+  // Validated user ID (user_id property).
+  string user_id = 7;
+  // Publishers set the timestamp property.
+  bool timestamp = 8;
+  // Publisher application (app_id property).
+  string app_id = 9;
+  // Publishers wait for publisher confirms.
+  bool confirm = 10;
+  // Delay of delayed-message exchanges (x-delay header), e.g. "5m".
+  string delay = 11;
+}
+
+// DeliveryMode is the delivery_mode property.
+enum DeliveryMode {
+  DELIVERY_MODE_UNSPECIFIED = 0;
+  // Kept in memory only (1).
+  DELIVERY_MODE_TRANSIENT = 1;
+  // Written to disk by durable queues (2).
+  DELIVERY_MODE_PERSISTENT = 2;
+}
+
+// Consume holds basic.consume settings.
+message Consume {
+  // Consumers acknowledge automatically (no-ack) instead of explicitly.
+  bool auto_ack = 1;
+  // Prefetch (basic.qos); defaults to the service's.
+  int32 prefetch = 2;
+  // Exclusive consumer: the only one on the queue.
+  bool exclusive = 3;
+  // Consumer tag.
+  string consumer_tag = 4;
+  // Stream queues: where consumption starts (x-stream-offset): "first",
+  // "last", "next", an offset, an RFC 3339 timestamp or a duration.
+  string stream_offset = 5;
+  // Consumer priority (x-priority).
+  int32 priority = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message holds AMQP properties of a message, and optionally gives it its
+// own channel, documented even when no rpc uses it.
+message Message {
+  // Channel: exchange the message is published to.
+  string exchange = 1;
+  // Channel: routing key of the message.
+  string routing_key = 2;
+  // Type property (message binding messageType). Defaults to the full
+  // Protobuf name.
+  string type = 3;
+  // Content encoding property, e.g. "gzip".
+  string content_encoding = 4;
+}

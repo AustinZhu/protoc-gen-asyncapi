@@ -15,6 +15,7 @@ import (
 
 	// Every protocol's annotations are registered so that ForeignAnnotations
 	// recognizes them whichever plugin binary runs.
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/amqp/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/temporal/asyncapi/v1"
@@ -229,3 +230,6 @@ func ForeignAnnotations(s *protogen.Service, own protoreflect.FullName) bool {
 	}
 	return false
 }
+
+// SortedKeys returns the keys of a map in order.
+func SortedKeys[V any](m map[string]V) []string { return sortedKeys(m) }

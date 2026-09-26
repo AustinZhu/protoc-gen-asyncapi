@@ -2,6 +2,7 @@
 # repository root: buf generate --template examples/buf.gen.yaml
 version: v2
 inputs:
+  - directory: examples/amqp/proto
   - directory: examples/nats/proto
   - directory: examples/redis/proto
   - directory: examples/temporal/proto

@@ -5,8 +5,9 @@ info:
   title: Orders
   version: 1.0.0
   description: |-
-    Order processing that runs on Temporal, publishes events on NATS and
-    queues receipts on Redis: three protocols in one AsyncAPI document.
+    Order processing that runs on Temporal, publishes events on NATS, queues
+    receipts on Redis and invoices on RabbitMQ: four protocols in one AsyncAPI
+    document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -23,6 +24,9 @@ servers:
   redis:
     host: redis.example:6379
     protocol: redis
+  rabbitmq:
+    host: rabbitmq.example:5672
+    protocol: amqp
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -83,6 +87,31 @@ channels:
           - name: receipts
             startId: $
         bindingVersion: 0.1.0
+  default.orders.invoices:
+    address: orders.invoices
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/rabbitmq'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: ""
+          type: default
+        bindingVersion: 0.3.0
+  queue.orders.invoices:
+    address: orders.invoices
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: orders.invoices
+        bindingVersion: 0.3.0
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -126,6 +155,18 @@ operations:
     messages:
       - $ref: '#/channels/orders.receipts/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.Receipts.Send
+  Invoicing.Issue:
+    action: receive
+    channel:
+      $ref: '#/channels/queue.orders.invoices'
+    summary: Issues the invoice of a completed order.
+    bindings:
+      amqp:
+        ack: true
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/queue.orders.invoices/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.Invoicing.Issue
 components:
   schemas:
     mixed.v1.Order:
@@ -172,4 +213,8 @@ components:
       payload:
         $ref: '#/components/schemas/mixed.v1.OrderResult'
       name: OrderResult
+      bindings:
+        amqp:
+          messageType: mixed.v1.OrderResult
+          bindingVersion: 0.3.0
       x-protobuf-message: mixed.v1.OrderResult

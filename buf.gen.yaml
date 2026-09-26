@@ -1,6 +1,7 @@
 # Regenerates the Go bindings of the annotations (`make generate`).
 version: v2
 inputs:
+  - directory: proto/amqp
   - directory: proto/asyncapi
   - directory: proto/nats
   - directory: proto/redis

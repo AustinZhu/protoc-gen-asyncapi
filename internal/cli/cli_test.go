@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/pluginpb"
 
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/amqp"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
@@ -20,10 +21,12 @@ var update = flag.Bool("update", false, "update golden files")
 
 var importPaths = []string{
 	"testdata/protos",
+	"../../proto/amqp",
 	"../../proto/asyncapi",
 	"../../proto/nats",
 	"../../proto/redis",
 	"../../proto/temporal",
+	"../../examples/amqp/proto",
 	"../../examples/nats/proto",
 	"../../examples/redis/proto",
 	"../../examples/temporal/proto",
@@ -39,7 +42,7 @@ func TestGolden(t *testing.T) {
 	}{
 		{"mixed", "", []string{"mixed/v1/mixed.proto"}},
 		{"mixed_without_default_tags", "without_default_tags=true", []string{"mixed/v1/mixed.proto"}},
-		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shop/v1/orders.proto"}},
+		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shipping/v1/shipping.proto", "acme/shop/v1/orders.proto"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,6 +66,8 @@ func TestSingleProtocolPluginsIgnoreOthers(t *testing.T) {
 		{"nats without redis", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "Receipts.Send"},
 		{"temporal", golden.Run(temporal.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "workflow.ProcessOrder", "Events.Completed"},
 		{"redis", golden.Run(redis.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Receipts.Send", "Events.Completed"},
+		{"amqp", golden.Run(amqp.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Invoicing.Issue", "Receipts.Send"},
+		{"nats without amqp", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "Invoicing"},
 	} {
 		if tc.resp.Error != nil {
 			t.Fatalf("%s: %s", tc.name, tc.resp.GetError())

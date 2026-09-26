@@ -1,9 +1,11 @@
-// Order processing that runs on Temporal, publishes events on NATS and
-// queues receipts on Redis: three protocols in one AsyncAPI document.
+// Order processing that runs on Temporal, publishes events on NATS, queues
+// receipts on Redis and invoices on RabbitMQ: four protocols in one AsyncAPI
+// document.
 syntax = "proto3";
 
 package mixed.v1;
 
+import "amqp/asyncapi/v1/annotations.proto";
 import "asyncapi/v3/annotations.proto";
 import "google/protobuf/empty.proto";
 import "nats/asyncapi/v1/annotations.proto";
@@ -15,7 +17,8 @@ option (asyncapi.v3.document) = {
   servers: [
     {name: "nats", host: "nats.example:4222", protocol: "nats"},
     {name: "temporal", host: "temporal.example:7233", protocol: "temporal"},
-    {name: "redis", host: "redis.example:6379", protocol: "redis"}
+    {name: "redis", host: "redis.example:6379", protocol: "redis"},
+    {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"}
   ]
 };
 
@@ -57,6 +60,16 @@ service Receipts {
   // Sends the receipt of a completed order.
   rpc Send(OrderResult) returns (google.protobuf.Empty) {
     option (redis.asyncapi.v1.operation) = {channel: "receipts"};
+  }
+}
+
+// Invoices, issued by a RabbitMQ consumer.
+service Invoicing {
+  option (asyncapi.v3.service) = {servers: ["rabbitmq"]};
+
+  // Issues the invoice of a completed order.
+  rpc Issue(OrderResult) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {queue: "orders.invoices"};
   }
 }
 

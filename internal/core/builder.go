@@ -626,8 +626,12 @@ func (b *Builder) ServiceTags(s *protogen.Service) []*asyncapi.Tag {
 type ChannelSpec struct {
 	// DeclaredBy locates errors.
 	DeclaredBy protoreflect.Descriptor
-	// Address of the channel; channels are shared by address.
+	// Address of the channel; channels are shared by address, or by Key
+	// when set.
 	Address string
+	// Key identifies the channel when the address alone does not, e.g. an
+	// AMQP routing key on two exchanges.
+	Key string
 	// Params are the parameter names appearing in the address.
 	Params []string
 	// DefaultID is used when no metadata sets an id.
@@ -652,7 +656,11 @@ func (b *Builder) Channel(spec ChannelSpec) (*Channel, error) {
 			break
 		}
 	}
-	ch := b.byAddress[spec.Address]
+	key := spec.Address
+	if spec.Key != "" {
+		key = "\x00" + spec.Key
+	}
+	ch := b.byAddress[key]
 	if ch == nil {
 		id := firstNonEmpty(explicitID, spec.DefaultID)
 		if !asyncapi.KeyPattern.MatchString(id) {
@@ -670,7 +678,7 @@ func (b *Builder) Channel(spec ChannelSpec) (*Channel, error) {
 			paramOpts:  map[string]*asyncapiv3.Parameter{},
 			servers:    map[string]bool{},
 		}
-		b.byAddress[spec.Address] = ch
+		b.byAddress[key] = ch
 		b.channels.Set(id, ch)
 		b.Doc.Channels.Set(id, ch.Obj)
 	} else if explicitID != "" && explicitID != ch.ID {

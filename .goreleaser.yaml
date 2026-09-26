@@ -16,6 +16,10 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }}
   - <<: *build
+    id: protoc-gen-amqp-asyncapi
+    main: ./cmd/protoc-gen-amqp-asyncapi
+    binary: protoc-gen-amqp-asyncapi
+  - <<: *build
     id: protoc-gen-nats-asyncapi
     main: ./cmd/protoc-gen-nats-asyncapi
     binary: protoc-gen-nats-asyncapi
@@ -42,6 +46,10 @@ archives:
     files:
       - README.md
       - proto/**/*.proto
+  - <<: *archive
+    id: protoc-gen-amqp-asyncapi
+    ids: [protoc-gen-amqp-asyncapi]
+    name_template: "protoc-gen-amqp-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   - <<: *archive
     id: protoc-gen-nats-asyncapi
     ids: [protoc-gen-nats-asyncapi]

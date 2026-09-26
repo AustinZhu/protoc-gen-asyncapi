@@ -10,14 +10,16 @@ The repository is one shared core plus one package per protocol:
 | Part | Annotations | What it covers |
 | --- | --- | --- |
 | **Core** | `asyncapi/v3/annotations.proto` (`buf.build/austin-zhu/asyncapi`) | The whole AsyncAPI 3.0/3.1 object model: info, servers, security schemes and OAuth flows, channels, parameters, operations, replies, messages, headers, examples, tags, external docs, bindings and `x-` extensions. JSON Schemas for every payload, from the proto definitions, comments, [protovalidate](https://github.com/bufbuild/protovalidate) rules and `google.api.field_behavior`. |
+| **AMQP** | `amqp/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/amqp-asyncapi`) | AMQP 0-9-1 and RabbitMQ, using the official AsyncAPI AMQP bindings. Covers exchanges (direct, fanout, topic, headers, alternate, delayed, exchange-to-exchange bindings), queues (classic, quorum and stream, with TTLs, length limits, dead-lettering and priorities) and their bindings, publishing (delivery mode, priority, expiration, CC/BCC, confirms), consuming (acks, prefetch, exclusive and stream consumers), RPC over `reply_to` and direct reply-to, and server details (vhost, TLS, heartbeat, SASL mechanism). |
 | **NATS** | `nats/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/nats-asyncapi`) | Core NATS publish/subscribe, request/reply, queue groups, [NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services, JetStream streams and consumers, KV buckets and object stores. |
 | **Redis** | `redis/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/redis-asyncapi`) | Pub/Sub (plain, pattern and sharded), Streams with consumer groups, trimming, claiming and dead letters, Lists as FIFO, LIFO and reliable queues, keyspace and keyevent notifications, request/reply, and server details (topology, database, TLS, RESP, authentication). |
 | **Temporal** | `temporal/asyncapi/v1/options.proto` (`buf.build/austin-zhu/temporal-asyncapi`) | [Temporal](https://temporal.io) Workflows, Activities, Signals, Queries and Updates, with task queues, timeouts, retry policies and continue-as-new. |
 
-Four binaries are built from it:
+Five binaries are built from it:
 
-- **`protoc-gen-asyncapi`** documents every protocol. One document may mix NATS, Redis and Temporal services.
-- **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document
+- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, NATS, Redis and Temporal services.
+- **`protoc-gen-amqp-asyncapi`**, **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and
+  **`protoc-gen-temporal-asyncapi`** document
   only their own protocol and ignore services annotated for another.
 
 The plugin generates documentation only. It generates no code and never contacts a server.
@@ -32,6 +34,7 @@ go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-asyncapi@late
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-temporal-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-nats-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-redis-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-amqp-asyncapi@latest
 ```
 
 Prebuilt binaries are attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-asyncapi/releases),
@@ -49,6 +52,7 @@ deps:
   - buf.build/austin-zhu/temporal-asyncapi   # temporal.asyncapi.v1
   - buf.build/austin-zhu/nats-asyncapi       # nats.asyncapi.v1
   - buf.build/austin-zhu/redis-asyncapi      # redis.asyncapi.v1
+  - buf.build/austin-zhu/amqp-asyncapi       # amqp.asyncapi.v1
   # pin a release with :v0.3.0
 ```
 
@@ -124,7 +128,29 @@ service Delivery {
 }
 ```
 
+An AMQP (RabbitMQ) service:
+
+```proto
+import "amqp/asyncapi/v1/annotations.proto";
+import "google/protobuf/empty.proto";
+
+option (amqp.asyncapi.v1.document) = {
+  exchanges: [{name: "shipping", type: EXCHANGE_TYPE_TOPIC, durable: true}]
+  queues: [{name: "shipping.labels", type: QUEUE_TYPE_QUORUM}]
+};
+
+service Shipments {
+  option (amqp.asyncapi.v1.service) = {exchange: "shipping", routing_key_prefix: "shipment"};
+
+  // Prints the label of every new shipment.
+  rpc PrintLabel(ShipmentCreated) returns (google.protobuf.Empty) {
+    option (amqp.asyncapi.v1.operation) = {routing_key: "created.*", queue: "shipping.labels", consume: {prefetch: 5}};
+  }
+}
+```
+
 [`examples/`](examples) has a complete setup for every protocol and the documents it generates:
+[AMQP](examples/asyncapi/acme/shipping/v1/shipping.asyncapi.yaml),
 [NATS](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml),
 [Redis](examples/asyncapi/acme/notify/v1/notify.asyncapi.yaml) and
 [Temporal](examples/asyncapi/acme/shop/v1/orders.asyncapi.yaml).
@@ -283,6 +309,54 @@ command the documented application runs, with its arguments.
   TLS, RESP version and `notify-keyspace-events` to servers, and the Redis authentication mechanism (password, ACL,
   TLS client certificates) to security schemes.
 
+## AMQP (RabbitMQ)
+
+Documents use the official AsyncAPI AMQP bindings (0.3.0). RabbitMQ details they don't define go in an `x-rabbitmq`
+object inside them, and server details go in an `x-amqp` server binding, because AsyncAPI reserves the `amqp`
+server binding.
+
+**Channels.** An rpc has up to two channels:
+- a **routing key on an exchange** (`is: routingKey`), where publishers send;
+- the **queue** consumers read from (`is: queue`).
+
+The documented application's side decides which channel an operation uses. With `perspective=server`, a consuming
+service `receive`s from its queue and a publishing service `send`s to its routing key; `perspective=client` flips
+both.
+
+| `(amqp.asyncapi.v1.operation)` | Default |
+| --- | --- |
+| `exchange` | The service's, else the default exchange (`""`), which delivers to the queue named after the routing key. |
+| `routing_key` | `<package>.<service>.<rpc>` in snake_case, after the service's `routing_key_prefix`. Empty on fanout and headers exchanges, which ignore it. `{name}` placeholders are channel parameters; `*` and `#` are binding patterns for consumers on topic exchanges. |
+| `queue` | The service's, else the routing key on the default exchange. It is bound to the exchange with the routing key, parameters matching any word on topic exchanges, unless a declared queue lists its own bindings. |
+| `publish` | `mandatory`, `delivery_mode`, `priority`, `expiration`, `cc`, `bcc`, `user_id`, `timestamp`, `app_id`, publisher `confirm`, and `delay` for delayed-message exchanges (documented as an `x-delay` header). |
+| `consume` | `auto_ack` (the official `ack` is its opposite), `prefetch` (defaults to the service's), `exclusive`, `consumer_tag`, consumer `priority`, and `stream_offset` for stream queues. |
+| `reply_queue` | For request/reply rpcs. Replies go to the queue named by the request's `reply_to` property, RabbitMQ's direct reply-to (`amq.rabbitmq.reply-to`) unless a queue is given. Requests and replies are correlated by `correlation_id`. |
+
+- **Pattern inference.** As for NATS, request/reply, publish or subscribe is inferred from the rpc shape.
+- **Message properties.** The properties publishers set, such as priority, TTL and delivery mode, describe the messages
+  on both sides. Publishing flags only appear on publishers, and consuming settings only on consumers.
+- **Topology.** `(amqp.asyncapi.v1.document)` declares the topology:
+  - **Exchanges:** type, durability, internal, alternate exchange, delayed messages and arguments.
+  - **Queues:** classic, quorum or stream, with TTLs, expiry, length limits, overflow, dead-lettering, priority,
+    single active consumer, delivery limit, stream retention and arguments.
+  - **Bindings:** queue bindings (including headers matches) and exchange-to-exchange bindings.
+
+  Declared queues are documented even without an rpc. Their arguments appear under
+  `x-rabbitmq.arguments`, as RabbitMQ receives them (`x-queue-type`, `x-message-ttl` in milliseconds, …).
+- **Messages.** Every message carries the official message binding: `messageType` is the full Protobuf name unless
+  `(amqp.asyncapi.v1.message).type` sets it, and `content_encoding` sets `contentEncoding`. A message with an
+  `exchange` or `routing_key` gets its own channel without an rpc.
+- **Servers and auth.** `(amqp.asyncapi.v1.document)` adds the vhost, TLS, heartbeat, `frame_max` and `channel_max`
+  to servers, and the SASL mechanism (PLAIN, AMQPLAIN, EXTERNAL) to security schemes.
+
+Generation fails with `file:line:column` on topology RabbitMQ would reject or that doesn't route, for example:
+- wildcards on a non-topic exchange;
+- publishing to an internal exchange;
+- a priority above the queue's `max_priority`;
+- quorum or stream queue options on the wrong queue type;
+- a stream consumer without prefetch;
+- references to undeclared exchanges.
+
 ## How Protobuf maps onto JSON Schema
 
 Schemas describe the canonical **Protobuf JSON** encoding.
@@ -352,7 +426,7 @@ Both overrides must be valid JSON Schema (draft-07). Generation fails with `file
 
 A protocol implements `core.Protocol` (`internal/core/builder.go`): it claims the services it understands and adds
 channels, messages and operations through `core.Builder`. The core handles everything else: documents, servers,
-security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis` and `internal/nats`, then register
+security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp` and `internal/nats`, then register
 the protocol in `internal/cli/plugins.go` and give it an annotations module under `proto/`.
 
 ## Development
@@ -375,14 +449,14 @@ Push a `v*` tag, or run the **release** workflow manually with a version. The wo
 failure:
 
 1. Tests and spec validation, as in CI.
-2. For each of `proto/asyncapi`, `proto/nats`, `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
+2. For each of `proto/amqp`, `proto/asyncapi`, `proto/nats`, `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
-3. GoReleaser publishes the GitHub release and the four binaries.
-4. The four annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
+3. GoReleaser publishes the GitHub release and the five binaries.
+4. The five annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
    the `main` label, the BSR's default, so unpinned dependencies resolve to it. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the
-`BUF_TOKEN` bot user write access to those four modules only. The token is passed to `buf push` through the
+`BUF_TOKEN` bot user write access to those five modules only. The token is passed to `buf push` through the
 environment and is never logged or written to disk.

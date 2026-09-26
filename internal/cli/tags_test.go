@@ -6,6 +6,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/amqp"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/core"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
@@ -19,6 +20,7 @@ import (
 const tagsProto = `syntax = "proto3";
 package tags.v1;
 import "asyncapi/v3/annotations.proto";
+import "amqp/asyncapi/v1/annotations.proto";
 import "google/protobuf/empty.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
@@ -30,6 +32,7 @@ option (asyncapi.v3.document) = {
   servers: [
     {name: "nats", host: "nats:4222", protocol: "nats"},
     {name: "redis", host: "redis:6379", protocol: "redis"},
+    {name: "rabbitmq", host: "rabbitmq:5672", protocol: "amqp"},
     {name: "temporal", host: "temporal:7233", protocol: "temporal"}
   ]
 };
@@ -60,6 +63,13 @@ service Cache {
   option (asyncapi.v3.service) = {tags: [{name: "Cache", description: "Declared explicitly."}]};
   // Invalidates.
   rpc Invalidate(M) returns (google.protobuf.Empty) { option (redis.asyncapi.v1.operation) = {}; }
+}
+
+// Billing over RabbitMQ.
+service Billing {
+  option (asyncapi.v3.service) = {tags: [{name: "payments"}]};
+  // Charges.
+  rpc Charge(M) returns (M) { option (amqp.asyncapi.v1.operation) = {}; }
 }
 
 message M { string id = 1; }
@@ -110,7 +120,7 @@ func (d tagDoc) infoTags() string {
 }
 
 func TestWithoutDefaultTags(t *testing.T) {
-	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache"
+	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing"
 	for _, tc := range []struct {
 		param string
 		ops   map[string]string
@@ -127,6 +137,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Api.discovery.PING": "Api",
 				"Cache.Invalidate":   "Cache",
 				"Cache.expiry":       "Cache",
+				"Billing.Charge":     "Billing,payments",
 			},
 			info: withDefaults,
 		},
@@ -141,6 +152,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Api.discovery.PING": "",
 				"Cache.Invalidate":   "Cache",
 				"Cache.expiry":       "",
+				"Billing.Charge":     "payments",
 			},
 			info: "platform,Workflows,workflow:Run,Signals",
 		},
@@ -193,6 +205,7 @@ func TestWithoutDefaultTagsEveryPlugin(t *testing.T) {
 		tag string // protocol or declared tag kept
 	}{
 		{All, "Api.Get", "reads"},
+		{amqp.Plugin, "Billing.Charge", "payments"},
 		{nats.Plugin, "Api.Get", "reads"},
 		{redis.Plugin, "Cache.Invalidate", "Cache"},
 		{temporal.Plugin, "workflow.Run", "Workflows"},
