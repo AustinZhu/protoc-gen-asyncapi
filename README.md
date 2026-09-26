@@ -174,6 +174,7 @@ them for each binary.
 | `proto_types` | `false` | Annotate every property with its `x-protobuf-type`. |
 | `trim_unused_schemas` | `false` | Emit only schemas reachable from an operation. By default every message and enum of the documented files is included. |
 | `protovalidate` | `true` | Translate `buf.validate` constraints when `buf/validate/validate.proto` is among the inputs. |
+| `without_default_tags` | `false` | Don't tag operations with their service's name, and don't declare those tags in `info.tags`. See [Tags](#tags). |
 | `server_url` | none | Temporal only: frontend address (`host:port`, or a URL). Adds a `temporal` server. |
 | `namespace` | none | Temporal only: namespace of the document's Temporal servers that don't set one, as `x-temporal-namespace`. |
 | `include_all` | `false` | NATS only: also document services without NATS annotations. |
@@ -181,6 +182,21 @@ them for each binary.
 The same settings, and everything else about the document (servers, security schemes, tags, external docs and so
 on), can also be declared with `(asyncapi.v3.document)` in the proto itself, so each file can carry its own. When
 both are given, the plugin option wins.
+
+### Tags
+
+Operations get three kinds of tags, in this order:
+
+1. **Default tags.** Each operation is tagged with its service's name, described in `info.tags` by the first sentence
+   of the service's comment. This includes synthetic operations such as NATS micro discovery endpoints and Redis
+   keyspace notifications.
+2. **Protocol tags.** For example, Temporal's `Workflows`, `Signals`, … and `workflow:<Name>` tags.
+3. **Declared tags.** These come from `(asyncapi.v3.service).tags` and `(asyncapi.v3.operation).tags`, and
+   `(asyncapi.v3.document).tags` adds to `info.tags`.
+
+`without_default_tags=true` drops only the first kind, for example when services already declare the tags to group
+by. A declared tag that happens to carry the service's name is kept, with its declared description. Every binary
+accepts the option, and the output is unchanged without it.
 
 ## The core annotations
 

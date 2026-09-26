@@ -600,15 +600,19 @@ func (b *Builder) AddInfoTag(t *asyncapi.Tag) {
 	}
 }
 
-// ServiceTag returns the tag of a service (its name, described by the first
-// sentence of its comment) and declares it in info.tags.
-func (b *Builder) ServiceTag(s *protogen.Service) *asyncapi.Tag {
+// ServiceTags returns the default tag of a service (its name, described by
+// the first sentence of its comment) and declares it in info.tags. With
+// without_default_tags it returns nothing and declares nothing.
+func (b *Builder) ServiceTags(s *protogen.Service) []*asyncapi.Tag {
+	if b.Params.WithoutDefaultTags {
+		return nil
+	}
 	t := &asyncapi.Tag{Name: string(s.Desc.Name())}
 	if summary, _ := summarize(describe(s.Comments)); summary != "" {
 		t.Description = summary
 	}
 	b.AddInfoTag(t)
-	return &asyncapi.Tag{Name: t.Name}
+	return []*asyncapi.Tag{{Name: t.Name}}
 }
 
 // ---------------------------------------------------------------------------
@@ -802,7 +806,7 @@ func (b *Builder) AddOperation(spec OpSpec) (*Op, error) {
 	if op.ExternalDocs == nil {
 		op.ExternalDocs = ConvertDocs(svcOpt.GetExternalDocs())
 	}
-	op.Tags = []*asyncapi.Tag{b.ServiceTag(s)}
+	op.Tags = b.ServiceTags(s)
 	for _, t := range spec.Tags {
 		op.Tags = AddTag(op.Tags, t)
 	}

@@ -60,7 +60,7 @@ func (p *Protocol) addMicroDiscovery(s *protogen.Service, m *natsv1.Micro) error
 			Action:     action,
 			Channel:    ch.Ref(),
 			Summary:    v.summary,
-			Tags:       []*asyncapi.Tag{b.ServiceTag(s)},
+			Tags:       b.ServiceTags(s),
 			Messages:   []*asyncapi.Reference{ch.MessageRef(request)},
 			Extensions: asyncapi.Extensions{"x-nats-micro": x},
 		}, ch, request)

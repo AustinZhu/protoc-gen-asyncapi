@@ -583,7 +583,7 @@ func (p *Protocol) addKeyspace(s *protogen.Service, svcOpt *redisv1.Service, k *
 			Channel:     ch.Ref(),
 			Summary:     summary,
 			Description: description,
-			Tags:        []*asyncapi.Tag{b.ServiceTag(s)},
+			Tags:        b.ServiceTags(s),
 			Messages:    []*asyncapi.Reference{ch.MessageRef(payload)},
 			Bindings:    asyncapi.NewBindings(BindingKey, x),
 		}, ch, payload)

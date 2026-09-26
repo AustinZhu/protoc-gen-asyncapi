@@ -38,6 +38,7 @@ func TestGolden(t *testing.T) {
 		files []string
 	}{
 		{"mixed", "", []string{"mixed/v1/mixed.proto"}},
+		{"mixed_without_default_tags", "without_default_tags=true", []string{"mixed/v1/mixed.proto"}},
 		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shop/v1/orders.proto"}},
 	}
 	for _, tc := range cases {

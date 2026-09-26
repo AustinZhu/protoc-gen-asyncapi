@@ -52,6 +52,9 @@ type Params struct {
 	TrimUnusedSchemas bool
 	// Translate buf.validate constraints (default true).
 	Protovalidate bool
+	// Omit the tag named after each service (and its info.tags entry);
+	// declared and protocol tags are kept.
+	WithoutDefaultTags bool
 	// Fully-qualified service name globs to document; empty means all.
 	// "*" matches one name segment and "**" any number.
 	Services []string
@@ -149,6 +152,7 @@ func (p *Params) Options() []Option {
 		}},
 		{"trim_unused_schemas", "true|false: only schemas reachable from an operation", BoolOption("trim_unused_schemas", &p.TrimUnusedSchemas)},
 		{"protovalidate", "true|false: translate buf.validate constraints (default true)", BoolOption("protovalidate", &p.Protovalidate)},
+		{"without_default_tags", "true|false: omit the tags named after services; declared and protocol tags are kept", BoolOption("without_default_tags", &p.WithoutDefaultTags)},
 		{"proto_types", "true|false: annotate fields with x-protobuf-type", BoolOption("proto_types", &p.ProtoTypes)},
 		{"services", "fully-qualified service glob, e.g. acme.orders.** (repeatable)", func(v string) error {
 			for _, g := range strings.Split(v, "|") {
