@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -31,43 +32,49 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-func resolvePattern(m *protogen.Method, pat mqttv1.Pattern) (mqttv1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat mqttv1.Pattern) (mqttv1.Pattern, core.Shape, error) {
+	shapes := map[mqttv1.Pattern]core.Shape{
+		mqttv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		mqttv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		mqttv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		mqttv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != mqttv1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the MQTT pattern of a bidirectional streaming rpc; set (mqtt.asyncapi.v1.operation).pattern")
-	case out:
-		return mqttv1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return mqttv1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(mqtt.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return mqttv1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 func (p *Protocol) addMethod(s *protogen.Service, svcOpt *mqttv1.Service, m *protogen.Method) error {
 	b := p.b
 	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-	var payload, response *protogen.Message
-	switch pattern {
-	case mqttv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
+		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
+	}
+	payload, response := core.Payloads(m, shape)
+	if pattern == mqttv1.Pattern_PATTERN_REQUEST_REPLY {
 		if err := p.requireV5(true, "request/response (response topic and correlation data)"); err != nil {
 			return fail("%v", err)
-		}
-	case mqttv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case mqttv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
 		}
 	}
 	msgOpt := messageOptions(payload)
@@ -100,7 +107,7 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *mqttv1.Service, m *pro
 		return err
 	}
 	t := p.chans[ch]
-	if pattern != mqttv1.Pattern_PATTERN_SUBSCRIBE {
+	if pattern != mqttv1.Pattern_PATTERN_SUBSCRIBE && pattern != mqttv1.Pattern_PATTERN_PROCESS {
 		if err := t.publishable(); err != nil {
 			return fail("%v", err)
 		}
@@ -125,7 +132,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *mqttv1.Service, m *pro
 	if q == mqttv1.Qos_QOS_UNSPECIFIED {
 		q = svcOpt.GetQos()
 	}
-	bd, err := p.operationBinding(opt, action, t, q, group)
+	inOpt := opt
+	if shape == core.ShapeProcess {
+		inOpt = proto.Clone(opt).(*mqttv1.Operation)
+		inOpt.Retain, inOpt.MessageExpiry = false, ""
+	}
+	bd, err := p.operationBinding(inOpt, action, t, q, group)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -142,6 +154,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *mqttv1.Service, m *pro
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, name, action, q, response); err != nil {
+			return err
+		}
+	}
 	if pattern != mqttv1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyTopic() != "" || len(opt.GetReplyMessages()) > 0 {
 			return fail("reply_topic and reply_messages are only valid for REQUEST_REPLY operations")
@@ -263,4 +280,50 @@ func (p *Protocol) operationBinding(opt *mqttv1.Operation, action asyncapi.Actio
 	}
 	bd.Set(ExtensionKey, x)
 	return bd, nil
+}
+
+// addOutput adds the operation publishing a processor's output: the
+// opposite action of its input, on the output topic, with the publication
+// settings.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *mqttv1.Service, m *protogen.Method, opt *mqttv1.Operation, input string, inAction asyncapi.Action, q mqttv1.Qos, output *protogen.Message) error {
+	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
+	name := joinTopic(input, "output")
+	if opt.GetOutput() != "" {
+		name = joinTopic(svcOpt.GetTopicPrefix(), opt.GetOutput())
+	}
+	ch, err := p.topicChannel(m.Desc, name, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	t := p.chans[ch]
+	if err := t.publishable(); err != nil {
+		return fail("output: %v", err)
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	// The subscription options belong to the input; the output's
+	// subscribers are the service's callers.
+	outOpt := &mqttv1.Operation{Retain: opt.GetRetain(), MessageExpiry: opt.GetMessageExpiry()}
+	bd, err := p.operationBinding(outOpt, action, t, q, "")
+	if err != nil {
+		return fail("output: %v", err)
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  asyncapi.NewBindings(BindingKey, bd),
+	})
+	return err
 }

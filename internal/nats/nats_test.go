@@ -44,6 +44,8 @@ func TestGolden(t *testing.T) {
 		{"overrides_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"overrides/v1/overrides.proto"}},
 		{"overrides_jsonschema", "format=jsonschema", []string{"overrides/v1/overrides.proto"}},
 		{"overrides_protobuf", "payload=protobuf", []string{"overrides/v1/overrides.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"services_filter", "include_all=true,services=inventory.**", []string{"inventory/v1/inventory.proto", "billing/v1/billing.proto"}},
 	}
 	for _, tc := range cases {
@@ -65,8 +67,14 @@ message Msg { string id = 1; }
 	cases := []struct {
 		name, param, src, want string
 	}{
-		{"bidi", "", `service S { rpc M(stream Msg) returns (stream Msg) { option (nats.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the NATS pattern of a bidirectional streaming method"},
+		{"client stream with response", "", `service S { rpc M(stream Msg) returns (Msg) { option (nats.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (nats.asyncapi.v1.operation).pattern"},
+		{"process with empty", "", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (nats.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", "", `service S { rpc M(Msg) returns (Msg) { option (nats.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"wildcard output", "", `service S { rpc M(stream Msg) returns (stream Msg) { option (nats.asyncapi.v1.operation) = {output: "a.*"}; } }`,
+			`output subject "a.*" must not contain wildcards`},
 		{"empty token", "", `service S { rpc M(Msg) returns (Msg) { option (nats.asyncapi.v1.operation) = {subject: "a..b"}; } }`,
 			`subject "a..b" has an empty token`},
 		{"partial param", "", `service S { rpc M(Msg) returns (Msg) { option (nats.asyncapi.v1.operation) = {subject: "a.x{id}"}; } }`,

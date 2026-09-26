@@ -250,9 +250,15 @@ func (Effect) EnumDescriptor() ([]byte, []int) {
 }
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -263,6 +269,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service receives messages.
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -272,12 +282,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -834,6 +846,10 @@ type Operation struct {
 	// REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
 	// an error message.
 	ReplyMessages []string `protobuf:"bytes,6,rep,name=reply_messages,json=replyMessages,proto3" json:"reply_messages,omitempty"`
+	// PROCESS: Queue the output is sent to, after the service's queue_prefix.
+	// Defaults to the input queue followed by "-output" (before any ".fifo"
+	// suffix).
+	Output        string `protobuf:"bytes,7,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -908,6 +924,13 @@ func (x *Operation) GetReplyMessages() []string {
 		return x.ReplyMessages
 	}
 	return nil
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
 }
 
 // Send holds SendMessage settings.
@@ -1221,7 +1244,7 @@ const file_sqs_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"principals\x12\x18\n" +
 	"\aactions\x18\x03 \x03(\tR\aactions\",\n" +
 	"\aService\x12!\n" +
-	"\fqueue_prefix\x18\x01 \x01(\tR\vqueuePrefix\"\xfc\x01\n" +
+	"\fqueue_prefix\x18\x01 \x01(\tR\vqueuePrefix\"\x94\x02\n" +
 	"\tOperation\x122\n" +
 	"\apattern\x18\x01 \x01(\x0e2\x18.sqs.asyncapi.v1.PatternR\apattern\x12\x14\n" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12)\n" +
@@ -1229,7 +1252,8 @@ const file_sqs_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\areceive\x18\x04 \x01(\v2\x18.sqs.asyncapi.v1.ReceiveR\areceive\x12\x1f\n" +
 	"\vreply_queue\x18\x05 \x01(\tR\n" +
 	"replyQueue\x12%\n" +
-	"\x0ereply_messages\x18\x06 \x03(\tR\rreplyMessages\"\x87\x01\n" +
+	"\x0ereply_messages\x18\x06 \x03(\tR\rreplyMessages\x12\x16\n" +
+	"\x06output\x18\a \x01(\tR\x06output\"\x87\x01\n" +
 	"\x04Send\x12(\n" +
 	"\x10message_group_id\x18\x01 \x01(\tR\x0emessageGroupId\x12)\n" +
 	"\x10deduplication_id\x18\x02 \x01(\tR\x0fdeduplicationId\x12\x14\n" +
@@ -1258,12 +1282,13 @@ const file_sqs_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x06Effect\x12\x16\n" +
 	"\x12EFFECT_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fEFFECT_ALLOW\x10\x01\x12\x0f\n" +
-	"\vEFFECT_DENY\x10\x02*i\n" +
+	"\vEFFECT_DENY\x10\x02*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03:U\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04:U\n" +
 	"\bdocument\x12\x1c.google.protobuf.FileOptions\x18\x8c\xc8\x03 \x01(\v2\x19.sqs.asyncapi.v1.DocumentR\bdocument:U\n" +
 	"\aservice\x12\x1f.google.protobuf.ServiceOptions\x18\x8c\xc8\x03 \x01(\v2\x18.sqs.asyncapi.v1.ServiceR\aservice:Z\n" +
 	"\toperation\x12\x1e.google.protobuf.MethodOptions\x18\x8c\xc8\x03 \x01(\v2\x1a.sqs.asyncapi.v1.OperationR\toperation:U\n" +

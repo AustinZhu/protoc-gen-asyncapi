@@ -277,9 +277,15 @@ func (KeyspaceKind) EnumDescriptor() ([]byte, []int) {
 }
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -291,6 +297,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service consumes messages (the payload is the request).
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -300,12 +310,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -802,6 +814,10 @@ type Operation struct {
 	// REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
 	// an error message.
 	ReplyMessages []string `protobuf:"bytes,7,rep,name=reply_messages,json=replyMessages,proto3" json:"reply_messages,omitempty"`
+	// PROCESS: Channel name or key the output is sent to, with the same
+	// transport, relative to the service's key_prefix. Defaults to the input
+	// channel followed by ":output".
+	Output        string `protobuf:"bytes,8,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -896,6 +912,13 @@ func (x *Operation) GetReplyMessages() []string {
 		return x.ReplyMessages
 	}
 	return nil
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
 }
 
 type isOperation_Transport interface {
@@ -1467,7 +1490,7 @@ const file_redis_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x03key\x18\x03 \x01(\tR\x03key\x12\x16\n" +
 	"\x06events\x18\x04 \x03(\tR\x06events\x12\x1a\n" +
 	"\bdatabase\x18\x05 \x01(\x05R\bdatabase\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\"\xcd\x02\n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\"\xe5\x02\n" +
 	"\tOperation\x124\n" +
 	"\apattern\x18\x01 \x01(\x0e2\x1a.redis.asyncapi.v1.PatternR\apattern\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x123\n" +
@@ -1475,7 +1498,8 @@ const file_redis_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x06stream\x18\x04 \x01(\v2\x19.redis.asyncapi.v1.StreamH\x00R\x06stream\x12-\n" +
 	"\x04list\x18\x05 \x01(\v2\x17.redis.asyncapi.v1.ListH\x00R\x04list\x12#\n" +
 	"\rreply_channel\x18\x06 \x01(\tR\freplyChannel\x12%\n" +
-	"\x0ereply_messages\x18\a \x03(\tR\rreplyMessagesB\v\n" +
+	"\x0ereply_messages\x18\a \x03(\tR\rreplyMessages\x12\x16\n" +
+	"\x06output\x18\b \x01(\tR\x06outputB\v\n" +
 	"\ttransport\"\"\n" +
 	"\x06PubSub\x12\x18\n" +
 	"\asharded\x18\x01 \x01(\bR\asharded\"\x84\x03\n" +
@@ -1531,12 +1555,13 @@ const file_redis_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\fKeyspaceKind\x12\x1d\n" +
 	"\x19KEYSPACE_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16KEYSPACE_KIND_KEYSPACE\x10\x01\x12\x1a\n" +
-	"\x16KEYSPACE_KIND_KEYEVENT\x10\x02*i\n" +
+	"\x16KEYSPACE_KIND_KEYEVENT\x10\x02*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03*7\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04*7\n" +
 	"\x03End\x12\x13\n" +
 	"\x0fEND_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bEND_LEFT\x10\x01\x12\r\n" +

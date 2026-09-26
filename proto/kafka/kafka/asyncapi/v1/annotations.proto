@@ -182,9 +182,15 @@ message Service {
 // ---------------------------------------------------------------------------
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 enum Pattern {
   PATTERN_UNSPECIFIED = 0;
   // The service consumes requests and produces each reply to reply_topic.
@@ -193,6 +199,10 @@ enum Pattern {
   PATTERN_PUBLISH = 2;
   // The service consumes records.
   PATTERN_SUBSCRIBE = 3;
+  // The service receives the input on the operation's channel and sends the
+  // output (the response) on the output channel, without replying: two
+  // operations, e.g. a stream processor.
+  PATTERN_PROCESS = 4;
 }
 
 // Operation describes the Kafka operation of an rpc.
@@ -218,6 +228,9 @@ message Operation {
   // REQUEST_REPLY: header correlating replies with requests. Defaults to
   // "correlation_id".
   string correlation_header = 9;
+  // PROCESS: Topic the output is produced to, relative to the service's
+  // topic_prefix. Defaults to the input topic followed by ".output".
+  string output = 10;
 }
 
 // Produce holds producer settings.

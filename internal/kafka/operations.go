@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -30,20 +31,28 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-func resolvePattern(m *protogen.Method, pat kafkav1.Pattern) (kafkav1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat kafkav1.Pattern) (kafkav1.Pattern, core.Shape, error) {
+	shapes := map[kafkav1.Pattern]core.Shape{
+		kafkav1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		kafkav1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		kafkav1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		kafkav1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != kafkav1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the Kafka pattern of a bidirectional streaming rpc; set (kafka.asyncapi.v1.operation).pattern")
-	case out:
-		return kafkav1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return kafkav1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(kafka.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return kafkav1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 func joinTopic(parts ...string) string {
@@ -60,23 +69,21 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *kafkav1.Service, m *pr
 	b := p.b
 	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-	var payload, response *protogen.Message
-	switch pattern {
-	case kafkav1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
+		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
+	}
+	payload, response := core.Payloads(m, shape)
+	if pattern == kafkav1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyTopic() == "" {
 			return fail("Kafka has no built-in replies: REQUEST_REPLY operations must set reply_topic")
-		}
-	case kafkav1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case kafkav1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
 		}
 	}
 	msgOpt := messageOptions(payload)
@@ -139,7 +146,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *kafkav1.Service, m *pr
 	if clientID == "" && server {
 		clientID = svcOpt.GetClientId()
 	}
-	bd, err := operationBinding(opt, action, consumerGroup, group, clientID)
+	inOpt := opt
+	if shape == core.ShapeProcess {
+		inOpt = proto.Clone(opt).(*kafkav1.Operation)
+		inOpt.Produce = nil
+	}
+	bd, err := operationBinding(inOpt, action, consumerGroup, group, clientID)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -156,6 +168,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *kafkav1.Service, m *pr
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, topic, action, clientID, response); err != nil {
+			return err
+		}
+	}
 	if pattern != kafkav1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyTopic() != "" || len(opt.GetReplyMessages()) > 0 || opt.GetCorrelationHeader() != "" {
 			return fail("reply_topic, reply_messages and correlation_header are only valid for REQUEST_REPLY operations")
@@ -313,4 +330,53 @@ func operationBinding(opt *kafkav1.Operation, action asyncapi.Action, consumerGr
 		bd.Set(ExtensionKey, x)
 	}
 	return bd, nil
+}
+
+// addOutput adds the operation producing a processor's output: the
+// opposite action of its input, on the output topic, with the produce
+// settings.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *kafkav1.Service, m *protogen.Method, opt *kafkav1.Operation, input string, inAction asyncapi.Action, clientID string, output *protogen.Message) error {
+	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
+	topic := joinTopic(input, "output")
+	if opt.GetOutput() != "" {
+		if _, err := parseTopic(opt.GetOutput()); err != nil {
+			return fail("output: %v", err)
+		}
+		topic = joinTopic(svcOpt.GetTopicPrefix(), opt.GetOutput())
+	}
+	if compacted(p.topics[topic]) && messageOptions(output).GetKey() == nil {
+		return fail("output topic %q is compacted: its records need keys; set (kafka.asyncapi.v1.message).key on %s", topic, output.Desc.FullName())
+	}
+	ch, err := p.topicChannel(m.Desc, topic, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	// The output's consumers are the service's callers: the group belongs
+	// to the input.
+	outOpt := proto.Clone(opt).(*kafkav1.Operation)
+	outOpt.Consume, outOpt.GroupId = nil, ""
+	bd, err := operationBinding(outOpt, action, "", "", clientID)
+	if err != nil {
+		return fail("output: %v", err)
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  asyncapi.NewBindings(BindingKey, bd),
+	})
+	return err
 }

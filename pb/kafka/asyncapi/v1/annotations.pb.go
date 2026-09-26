@@ -233,9 +233,15 @@ func (Compression) EnumDescriptor() ([]byte, []int) {
 }
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -246,6 +252,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service consumes records.
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -255,12 +265,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -963,8 +975,11 @@ type Operation struct {
 	// REQUEST_REPLY: header correlating replies with requests. Defaults to
 	// "correlation_id".
 	CorrelationHeader string `protobuf:"bytes,9,opt,name=correlation_header,json=correlationHeader,proto3" json:"correlation_header,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// PROCESS: Topic the output is produced to, relative to the service's
+	// topic_prefix. Defaults to the input topic followed by ".output".
+	Output        string `protobuf:"bytes,10,opt,name=output,proto3" json:"output,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Operation) Reset() {
@@ -1056,6 +1071,13 @@ func (x *Operation) GetReplyMessages() []string {
 func (x *Operation) GetCorrelationHeader() string {
 	if x != nil {
 		return x.CorrelationHeader
+	}
+	return ""
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
 	}
 	return ""
 }
@@ -1593,7 +1615,7 @@ const file_kafka_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\aService\x12!\n" +
 	"\ftopic_prefix\x18\x01 \x01(\tR\vtopicPrefix\x12\x19\n" +
 	"\bgroup_id\x18\x02 \x01(\tR\agroupId\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\xf2\x02\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\x8a\x03\n" +
 	"\tOperation\x124\n" +
 	"\apattern\x18\x01 \x01(\x0e2\x1a.kafka.asyncapi.v1.PatternR\apattern\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x19\n" +
@@ -1604,7 +1626,9 @@ const file_kafka_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\vreply_topic\x18\a \x01(\tR\n" +
 	"replyTopic\x12%\n" +
 	"\x0ereply_messages\x18\b \x03(\tR\rreplyMessages\x12-\n" +
-	"\x12correlation_header\x18\t \x01(\tR\x11correlationHeader\"\xc7\x02\n" +
+	"\x12correlation_header\x18\t \x01(\tR\x11correlationHeader\x12\x16\n" +
+	"\x06output\x18\n" +
+	" \x01(\tR\x06output\"\xc7\x02\n" +
 	"\aProduce\x12+\n" +
 	"\x04acks\x18\x01 \x01(\x0e2\x17.kafka.asyncapi.v1.AcksR\x04acks\x12\x1e\n" +
 	"\n" +
@@ -1659,12 +1683,13 @@ const file_kafka_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x12COMPRESSION_SNAPPY\x10\x03\x12\x13\n" +
 	"\x0fCOMPRESSION_LZ4\x10\x04\x12\x14\n" +
 	"\x10COMPRESSION_ZSTD\x10\x05\x12\x18\n" +
-	"\x14COMPRESSION_PRODUCER\x10\x06*i\n" +
+	"\x14COMPRESSION_PRODUCER\x10\x06*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03*J\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04*J\n" +
 	"\x04Acks\x12\x14\n" +
 	"\x10ACKS_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tACKS_NONE\x10\x01\x12\x0f\n" +

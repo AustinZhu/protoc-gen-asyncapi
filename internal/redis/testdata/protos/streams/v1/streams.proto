@@ -1,0 +1,75 @@
+// How rpc shapes map onto AsyncAPI operations.
+syntax = "proto3";
+
+package streams.v1;
+
+import "google/protobuf/empty.proto";
+import "redis/asyncapi/v1/annotations.proto";
+
+// Rpc shapes.
+service Shapes {
+  option (redis.asyncapi.v1.service) = {key_prefix: "shapes" consumer_group: "shapes"};
+
+  // A request answered by a stream of results: request/reply, as the number
+  // of replies is not an AsyncAPI concept.
+  rpc Search(Query) returns (stream Hit) {
+    option (redis.asyncapi.v1.operation) = {channel: "search" reply_messages: ["streams.v1.SearchDone"]};
+  }
+
+  // A stream processor: receives readings and sends enriched ones.
+  rpc Enrich(stream Reading) returns (stream Enriched) {
+    option (redis.asyncapi.v1.operation) = {channel: "readings.{sensor}"};
+  }
+
+  // A processor with its own output and settings for both sides.
+  rpc Normalize(stream Reading) returns (stream Enriched) {
+    option (redis.asyncapi.v1.operation) = {
+      channel: "raw"
+      output: "normalized"
+      stream: {
+        consumer: "normalizer"
+        count: 10
+        trim: {max_len: 1000}
+      }
+    };
+  }
+
+  // A unary rpc declared as a processor.
+  rpc Convert(Reading) returns (Enriched) {
+    option (redis.asyncapi.v1.operation) = {pattern: PATTERN_PROCESS channel: "convert"};
+  }
+
+  // Still a publication: no request.
+  rpc Ticks(google.protobuf.Empty) returns (stream Hit) {
+    option (redis.asyncapi.v1.operation) = {channel: "ticks"};
+  }
+
+  // A stream of requests without response: a subscription.
+  rpc Ingest(stream Reading) returns (google.protobuf.Empty) {
+    option (redis.asyncapi.v1.operation) = {channel: "ingest"};
+  }
+}
+
+message Query {
+  string text = 1;
+}
+
+message Hit {
+  string id = 1;
+}
+
+// Ends a search.
+message SearchDone {
+  int32 total = 1;
+}
+
+message Reading {
+  string sensor = 1;
+  double value = 2;
+}
+
+message Enriched {
+  string sensor = 1;
+  double value = 2;
+  string unit = 3;
+}

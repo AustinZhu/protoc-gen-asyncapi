@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -31,20 +32,28 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-func resolvePattern(m *protogen.Method, pat sqsv1.Pattern) (sqsv1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat sqsv1.Pattern) (sqsv1.Pattern, core.Shape, error) {
+	shapes := map[sqsv1.Pattern]core.Shape{
+		sqsv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		sqsv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		sqsv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		sqsv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != sqsv1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the SQS pattern of a bidirectional streaming rpc; set (sqs.asyncapi.v1.operation).pattern")
-	case out:
-		return sqsv1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return sqsv1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(sqs.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return sqsv1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 // joinName joins queue name segments with '-', keeping a ".fifo" suffix
@@ -63,23 +72,21 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *sqsv1.Service, m *prot
 	b := p.b
 	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-	var payload, response *protogen.Message
-	switch pattern {
-	case sqsv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
+		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
+	}
+	payload, response := core.Payloads(m, shape)
+	if pattern == sqsv1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyQueue() == "" {
 			return fail("SQS has no built-in replies: REQUEST_REPLY operations must set reply_queue")
-		}
-	case sqsv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case sqsv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
 		}
 	}
 
@@ -116,7 +123,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *sqsv1.Service, m *prot
 	}
 	ch.AddMessage(msg)
 
-	bd, err := p.operationBinding(opt, action, name)
+	inOpt := opt
+	if shape == core.ShapeProcess {
+		inOpt = proto.Clone(opt).(*sqsv1.Operation)
+		inOpt.Send = nil
+	}
+	bd, err := p.operationBinding(inOpt, action, name, shape != core.ShapeProcess)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -133,6 +145,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *sqsv1.Service, m *prot
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, name, action, response); err != nil {
+			return err
+		}
+	}
 	if pattern != sqsv1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyQueue() != "" || len(opt.GetReplyMessages()) > 0 {
 			return fail("reply_queue and reply_messages are only valid for REQUEST_REPLY operations")
@@ -184,15 +201,17 @@ func checkTemplate(field, v string) error {
 }
 
 // operationBinding validates the send and receive settings of an rpc and
-// renders the official operation binding of the documented side.
-func (p *Protocol) operationBinding(opt *sqsv1.Operation, action asyncapi.Action, name string) (*asyncapi.Map[any], error) {
+// renders the official operation binding of the documented side. The send
+// settings of the queue are only checked when its messages are sent by the
+// rpc's parties (not for a processor's input).
+func (p *Protocol) operationBinding(opt *sqsv1.Operation, action asyncapi.Action, name string, sent bool) (*asyncapi.Map[any], error) {
 	send, recv := opt.GetSend(), opt.GetReceive()
 	fifo := isFIFO(name)
 	q := p.queues[name]
 	switch {
-	case fifo && send.GetMessageGroupId() == "":
+	case fifo && sent && send.GetMessageGroupId() == "":
 		return nil, fmt.Errorf("queue %q is FIFO: set send.message_group_id", name)
-	case fifo && send.GetDeduplicationId() == "" && !q.GetContentBasedDeduplication():
+	case fifo && sent && send.GetDeduplicationId() == "" && !q.GetContentBasedDeduplication():
 		return nil, fmt.Errorf("queue %q is FIFO without content-based deduplication: set send.deduplication_id", name)
 	case !fifo && (send.GetMessageGroupId() != "" || send.GetDeduplicationId() != ""):
 		return nil, fmt.Errorf("message_group_id and deduplication_id only apply to FIFO queues (names ending with \".fifo\")")
@@ -256,4 +275,46 @@ func (p *Protocol) operationBinding(opt *sqsv1.Operation, action asyncapi.Action
 		bd.Set(ExtensionKey, x)
 	}
 	return bd, nil
+}
+
+// addOutput adds the operation sending a processor's output: the opposite
+// action of its input, on the output queue, with the send settings.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *sqsv1.Service, m *protogen.Method, opt *sqsv1.Operation, input string, inAction asyncapi.Action, output *protogen.Message) error {
+	name := joinName(strings.TrimSuffix(input, ".fifo"), "output")
+	if isFIFO(input) {
+		name += ".fifo"
+	}
+	if opt.GetOutput() != "" {
+		name = joinName(svcOpt.GetQueuePrefix(), opt.GetOutput())
+	}
+	ch, err := p.queueChannel(m.Desc, name, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	outOpt := proto.Clone(opt).(*sqsv1.Operation)
+	outOpt.Receive = nil
+	bd, err := p.operationBinding(outOpt, action, name, true)
+	if err != nil {
+		return core.Errorf(m.Desc, "output: %v", err)
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  asyncapi.NewBindings(BindingKey, bd),
+	})
+	return err
 }

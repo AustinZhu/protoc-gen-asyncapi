@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/inventory/v1/inventory.proto"}},
 		{"payments", "", []string{"payments/v1/payments.proto"}},
 		{"payments_client", "perspective=client", []string{"payments/v1/payments.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"payments_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"payments/v1/payments.proto"}},
 	}
 	for _, tc := range cases {
@@ -71,8 +73,14 @@ message Msg { string id = 1; }
 		return `message Ev { option (kafka.asyncapi.v1.message) = {topic: "events", key: {` + key + `}}; string id = 1; repeated string tags = 2; }`
 	}
 	cases := []struct{ name, src, want string }{
-		{"bidi", `service S { rpc M(stream Msg) returns (stream Msg) { option (kafka.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the Kafka pattern of a bidirectional streaming rpc"},
+		{"client stream with response", `service S { rpc M(stream Msg) returns (Msg) { option (kafka.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (kafka.asyncapi.v1.operation).pattern"},
+		{"process with empty", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (kafka.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (kafka.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"compacted output without key", topic(`cleanup_policy: [CLEANUP_POLICY_COMPACT]`) + `service S { rpc M(stream Msg) returns (stream Msg) { option (kafka.asyncapi.v1.operation) = {output: "events"}; } }`,
+			`output topic "events" is compacted`},
 		{"reply without topic", `service S { rpc M(Msg) returns (Msg) { option (kafka.asyncapi.v1.operation) = {}; } }`,
 			"REQUEST_REPLY operations must set reply_topic"},
 		{"reply on publish", pub(`reply_topic: "replies"`), "only valid for REQUEST_REPLY operations"},

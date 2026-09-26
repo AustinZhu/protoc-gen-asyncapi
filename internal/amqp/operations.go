@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -37,22 +38,28 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-// resolvePattern applies the inference rules documented on
-// amqp.asyncapi.v1.Pattern.
-func resolvePattern(m *protogen.Method, pat amqpv1.Pattern) (amqpv1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat amqpv1.Pattern) (amqpv1.Pattern, core.Shape, error) {
+	shapes := map[amqpv1.Pattern]core.Shape{
+		amqpv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		amqpv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		amqpv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		amqpv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != amqpv1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the AMQP pattern of a bidirectional streaming rpc; set (amqp.asyncapi.v1.operation).pattern")
-	case out:
-		return amqpv1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return amqpv1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(amqp.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return amqpv1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 // joinKey joins non-empty routing key segments with '.'.
@@ -70,23 +77,19 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *amqpv1.Service, m *pro
 	b := p.b
 	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-
-	var payload, response *protogen.Message
-	switch pattern {
-	case amqpv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
-	case amqpv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case amqpv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
 		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
 	}
+
+	payload, response := core.Payloads(m, shape)
 	msgOpt := messageOptions(payload)
 
 	// Exchange, routing key and queue.
@@ -132,8 +135,8 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *amqpv1.Service, m *pro
 		queueName = key
 	case exName == "" && queueName != key:
 		return fail("the default exchange delivers to the queue named after the routing key: routing key %q does not reach queue %q", key, queueName)
-	case wildcard && pattern != amqpv1.Pattern_PATTERN_SUBSCRIBE:
-		return fail("routing key %q: wildcards are binding patterns, only valid for SUBSCRIBE operations", key)
+	case wildcard && pattern != amqpv1.Pattern_PATTERN_SUBSCRIBE && pattern != amqpv1.Pattern_PATTERN_PROCESS:
+		return fail("routing key %q: wildcards are binding patterns, only valid for SUBSCRIBE and PROCESS operations", key)
 	case wildcard && !ex.topic():
 		return fail("routing key %q: wildcards need a topic exchange, %q is %s", key, exName, typeName(ex.typ))
 	}
@@ -176,7 +179,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *amqpv1.Service, m *pro
 		ch = queueCh
 	}
 
-	bd, err := p.operationBinding(m, svcOpt, opt, ex, q, action, msg)
+	inOpt := opt
+	if shape == core.ShapeProcess {
+		inOpt = proto.Clone(opt).(*amqpv1.Operation)
+		inOpt.Publish = nil
+	}
+	bd, err := p.operationBinding(m, svcOpt, inOpt, ex, q, action, msg)
 	if err != nil {
 		return err
 	}
@@ -193,6 +201,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *amqpv1.Service, m *pro
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, ex, key, action, response); err != nil {
+			return err
+		}
+	}
 	if pattern == amqpv1.Pattern_PATTERN_REQUEST_REPLY {
 		return p.addReply(op, m, opt, msg, response)
 	}
@@ -395,3 +408,76 @@ func (p *Protocol) addReply(op *core.Op, m *protogen.Method, opt *amqpv1.Operati
 }
 
 func messagesOf(ch *core.Channel) []*core.Message { return ch.Messages }
+
+// addOutput adds the operation publishing a processor's output: the
+// opposite action of its input, with the output routing key on the input's
+// exchange.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *amqpv1.Service, m *protogen.Method, opt *amqpv1.Operation, ex *exchange, input string, inAction asyncapi.Action, output *protogen.Message) error {
+	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
+	if ex.typeKnow && (ex.typ == amqpv1.ExchangeType_EXCHANGE_TYPE_FANOUT || ex.typ == amqpv1.ExchangeType_EXCHANGE_TYPE_HEADERS) {
+		return fail("exchange %q ignores routing keys: the output of a processor would reach its input; use a direct or topic exchange", ex.name)
+	}
+	key := joinKey(input, "output")
+	if opt.GetOutput() != "" {
+		key = joinKey(svcOpt.GetRoutingKeyPrefix(), opt.GetOutput())
+	}
+	params, err := parseKey(key)
+	if err != nil {
+		return fail("%v", err)
+	}
+	switch {
+	case strings.ContainsAny(key, "*#"):
+		return fail("output routing key %q must not contain wildcards; set output", key)
+	case ex.name == "" && len(params) > 0:
+		return fail("output routing key %q: the default exchange delivers to the queue named after the routing key, so it cannot have parameters", key)
+	}
+	routing, err := p.routingChannel(m.Desc, ex.name, key, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	var queueCh *core.Channel
+	if ex.name == "" {
+		if queueCh, err = p.queueChannel(m.Desc, key); err != nil {
+			return err
+		}
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	routing.AddMessage(msg)
+	if queueCh != nil {
+		queueCh.AddMessage(msg)
+	}
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	ch := routing
+	if action == asyncapi.ActionReceive && queueCh != nil {
+		ch = queueCh
+	}
+	var q *queue
+	if queueCh != nil {
+		q = p.topo.queue(key)
+	}
+	outOpt := proto.Clone(opt).(*amqpv1.Operation)
+	outOpt.Consume = nil
+	// The service's prefetch configures its input's consumers; the
+	// output's consumers are the service's callers.
+	bd, err := p.operationBinding(m, &amqpv1.Service{}, outOpt, ex, q, action, msg)
+	if err != nil {
+		return err
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  asyncapi.NewBindings("amqp", bd),
+	})
+	return err
+}

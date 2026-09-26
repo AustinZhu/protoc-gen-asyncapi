@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -366,20 +367,28 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-func resolvePattern(m *protogen.Method, pat pubsubv1.Pattern) (pubsubv1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat pubsubv1.Pattern) (pubsubv1.Pattern, core.Shape, error) {
+	shapes := map[pubsubv1.Pattern]core.Shape{
+		pubsubv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		pubsubv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		pubsubv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		pubsubv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != pubsubv1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the Pub/Sub pattern of a bidirectional streaming rpc; set (googlepubsub.asyncapi.v1.operation).pattern")
-	case out:
-		return pubsubv1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return pubsubv1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(googlepubsub.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return pubsubv1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 func joinID(parts ...string) string {
@@ -396,23 +405,21 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *pubsubv1.Service, m *p
 	b := p.b
 	fail := func(format string, args ...any) error { return core.Errorf(m.Desc, format, args...) }
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-	var payload, response *protogen.Message
-	switch pattern {
-	case pubsubv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
+		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
+	}
+	payload, response := core.Payloads(m, shape)
+	if pattern == pubsubv1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyTopic() == "" {
 			return fail("Pub/Sub has no built-in replies: REQUEST_REPLY operations must set reply_topic")
-		}
-	case pubsubv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case pubsubv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
 		}
 	}
 	msgOpt := messageOptions(payload)
@@ -463,7 +470,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *pubsubv1.Service, m *p
 		}
 	}
 
-	x, err := p.operationBinding(opt, action, sub, msg)
+	inOpt := opt
+	if shape == core.ShapeProcess {
+		inOpt = proto.Clone(opt).(*pubsubv1.Operation)
+		inOpt.Publish = nil
+	}
+	x, err := p.operationBinding(inOpt, action, sub, msg)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -484,6 +496,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *pubsubv1.Service, m *p
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, name, action, response); err != nil {
+			return err
+		}
+	}
 	if pattern != pubsubv1.Pattern_PATTERN_REQUEST_REPLY {
 		if opt.GetReplyTopic() != "" || len(opt.GetReplyMessages()) > 0 {
 			return fail("reply_topic and reply_messages are only valid for REQUEST_REPLY operations")
@@ -521,6 +538,50 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *pubsubv1.Service, m *p
 		}
 	}
 	return nil
+}
+
+// addOutput adds the operation publishing a processor's output: the
+// opposite action of its input, on the output topic, with the publish
+// settings.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *pubsubv1.Service, m *protogen.Method, opt *pubsubv1.Operation, input string, inAction asyncapi.Action, output *protogen.Message) error {
+	name := joinID(input, "output")
+	if opt.GetOutput() != "" {
+		name = joinID(svcOpt.GetTopicPrefix(), opt.GetOutput())
+	}
+	ch, err := p.topicChannel(m.Desc, name, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	outOpt := proto.Clone(opt).(*pubsubv1.Operation)
+	outOpt.Consume, outOpt.Subscription = nil, ""
+	x, err := p.operationBinding(outOpt, action, nil, msg)
+	if err != nil {
+		return core.Errorf(m.Desc, "output: %v", err)
+	}
+	var bindings *asyncapi.Bindings
+	if x.Len() > 0 {
+		bindings = asyncapi.NewBindings(ExtensionKey, x)
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  bindings,
+	})
+	return err
 }
 
 // subscription returns the subscription consumers of a topic read from,

@@ -340,6 +340,40 @@ Bindings take a protocol name and a JSON value. The plugin accepts only the prot
 defines for that object, or `x-` keys; 3.1 adds `ros2`. Every generated document is checked against the rules of the
 specification before it is written, and generation fails with `file:line:column` for every problem at once.
 
+## Rpc shapes
+
+On message brokers, an rpc's streaming and `google.protobuf.Empty` markers choose its pattern when the protocol
+annotation leaves `pattern` unset. Shapes only select core AsyncAPI operations and add no extensions:
+
+| rpc | Pattern | AsyncAPI (server perspective) |
+| --- | --- | --- |
+| `rpc M(Req) returns (Resp)` | `REQUEST_REPLY` | `receive` with a `reply` |
+| `rpc M(Req) returns (stream Resp)` | `REQUEST_REPLY` | `receive` with a `reply`: how many replies a request gets is not an AsyncAPI concept; list terminators such as an end-of-results message in `reply_messages` |
+| `rpc M(google.protobuf.Empty) returns (Resp)` | `REQUEST_REPLY` | `receive` with a `reply` |
+| `rpc M(Req) returns (google.protobuf.Empty)` | `SUBSCRIBE` | `receive` |
+| `rpc M(stream Req) returns (google.protobuf.Empty)` | `SUBSCRIBE` | `receive` |
+| `rpc M(google.protobuf.Empty) returns (stream Resp)` | `PUBLISH` | `send` |
+| `rpc M(stream Req) returns (stream Resp)` | `PROCESS` | `receive` of `Req` and `send` of `Resp` on the output channel |
+| `rpc M(stream Req) returns (Resp)` | none | rejected: set `pattern` |
+
+`PROCESS` documents a stream processor as two operations: `<id>` receives the input on the rpc's channel and
+`<id>.output` sends the response message on the output channel, without replying. `output` names the output channel,
+relative to the service's prefix. It defaults to the input channel followed by the protocol's separator and `output`:
+
+| Protocol | Default output | Output settings | Input settings |
+| --- | --- | --- | --- |
+| NATS | `<subject>.output` | publishing | queue group, JetStream consumer |
+| Redis | `<channel>:output` | `trim`, `no_mkstream`, `field`, `flatten`; `push`, `max_len` | consumer group and reading; `pop`, `block`, `processing_list` |
+| AMQP | `<routing key>.output`, on the same exchange | `publish` | `consume`, the queue |
+| Google Pub/Sub | `<topic>.output` | `publish` | `consume`, the subscription |
+| Kafka | `<topic>.output` | `produce` | `consume`, the group |
+| MQTT | `<topic>/output` | `retain`, `message_expiry` | `shared_group`, `retain_handling`, `no_local`, `retain_as_published` |
+| Amazon SQS | `<queue>-output`, before any `.fifo` | `send` | `receive` |
+
+A processor's input may use wildcards like any subscription; its output may not. The service's consumer defaults
+(groups, prefetch) apply to the input only. Any rpc can set `pattern: PATTERN_PROCESS`; neither side may be
+`google.protobuf.Empty`. Temporal has no streams and rejects streaming rpcs.
+
 ## Temporal
 
 | Temporal | Channel address | Operation | Reply |
@@ -395,7 +429,7 @@ command the documented application runs, with its arguments.
 
 - **Names.** `channel` is a channel name or key relative to the service's `key_prefix`, joined with `:`. It defaults
   to `<package>:<service>:<rpc>` in snake_case. `{name}` placeholders are channel parameters bound to payload fields.
-- **Patterns.** As for NATS, request/reply, publish or subscribe is inferred from the rpc shape. Replies go to
+- **Patterns.** Request/reply, publish, subscribe or process is inferred from the [rpc shape](#rpc-shapes). Replies go to
   `reply_channel` with the request's transport, or to a channel the requester chooses; `reply_messages` adds error
   replies.
 - **Streams.** Entries hold the encoded payload in one field (`payload` by default, or `field`), or one field per
@@ -431,7 +465,7 @@ both.
 | `consume` | `auto_ack` (the official `ack` is its opposite), `prefetch` (defaults to the service's), `exclusive`, `consumer_tag`, consumer `priority`, and `stream_offset` for stream queues. |
 | `reply_queue` | For request/reply rpcs. Replies go to the queue named by the request's `reply_to` property, RabbitMQ's direct reply-to (`amq.rabbitmq.reply-to`) unless a queue is given. Requests and replies are correlated by `correlation_id`. |
 
-- **Pattern inference.** As for NATS, request/reply, publish or subscribe is inferred from the rpc shape.
+- **Pattern inference.** Request/reply, publish, subscribe or process is inferred from the [rpc shape](#rpc-shapes).
 - **Message properties.** The properties publishers set, such as priority, TTL and delivery mode, describe the messages
   on both sides. Publishing flags only appear on publishers, and consuming settings only on consumers.
 - **Topology.** `(amqp.asyncapi.v1.document)` declares the topology:

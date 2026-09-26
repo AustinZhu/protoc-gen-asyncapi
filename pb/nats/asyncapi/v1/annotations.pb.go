@@ -112,14 +112,16 @@ func (AuthType) EnumDescriptor() ([]byte, []int) {
 	return file_nats_asyncapi_v1_annotations_proto_rawDescGZIP(), []int{0}
 }
 
-// Pattern tells how a method maps onto NATS messaging.
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
 //
-// When unspecified it is inferred from the method signature:
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
 //
-//	rpc A(Req) returns (Res)                    -> REQUEST_REPLY
-//	rpc B(Event) returns (google.protobuf.Empty) -> SUBSCRIBE
-//	rpc C(Event) returns (stream ...)           -> PUBLISH (payload is the output)
-//	rpc D(stream Event) returns (...)           -> SUBSCRIBE
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -131,6 +133,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service subscribes to (or consumes) the input message.
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -140,12 +146,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -1123,7 +1131,11 @@ type Operation struct {
 	// JetStream consumer used to receive the messages.
 	Consumer *Consumer `protobuf:"bytes,8,opt,name=consumer,proto3" json:"consumer,omitempty"`
 	// JetStream publish behaviour.
-	Publish       *Publish `protobuf:"bytes,9,opt,name=publish,proto3" json:"publish,omitempty"`
+	Publish *Publish `protobuf:"bytes,9,opt,name=publish,proto3" json:"publish,omitempty"`
+	// PROCESS: Subject the output is published to, joined to
+	// Service.subject_prefix. Defaults to the input subject followed by
+	// ".output".
+	Output        string `protobuf:"bytes,10,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1219,6 +1231,13 @@ func (x *Operation) GetPublish() *Publish {
 		return x.Publish
 	}
 	return nil
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
 }
 
 // Publish describes how messages are published to JetStream.
@@ -2647,7 +2666,7 @@ const file_nats_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\fno_discovery\x18\x06 \x01(\bR\vnoDiscovery\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe9\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x03\n" +
 	"\tOperation\x123\n" +
 	"\apattern\x18\x01 \x01(\x0e2\x19.nats.asyncapi.v1.PatternR\apattern\x12\x18\n" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1b\n" +
@@ -2658,7 +2677,9 @@ const file_nats_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x0ereply_messages\x18\x06 \x03(\tR\rreplyMessages\x12\x16\n" +
 	"\x06stream\x18\a \x01(\tR\x06stream\x126\n" +
 	"\bconsumer\x18\b \x01(\v2\x1a.nats.asyncapi.v1.ConsumerR\bconsumer\x123\n" +
-	"\apublish\x18\t \x01(\v2\x19.nats.asyncapi.v1.PublishR\apublish\"\xc2\x01\n" +
+	"\apublish\x18\t \x01(\v2\x19.nats.asyncapi.v1.PublishR\apublish\x12\x16\n" +
+	"\x06output\x18\n" +
+	" \x01(\tR\x06output\"\xc2\x01\n" +
 	"\aPublish\x12\x15\n" +
 	"\x03ack\x18\x01 \x01(\bH\x00R\x03ack\x88\x01\x01\x12\x15\n" +
 	"\x06msg_id\x18\x02 \x01(\bR\x05msgId\x120\n" +
@@ -2818,12 +2839,13 @@ const file_nats_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x0eAUTH_TYPE_NKEY\x10\x03\x12\x11\n" +
 	"\rAUTH_TYPE_JWT\x10\x04\x12\x11\n" +
 	"\rAUTH_TYPE_TLS\x10\x05\x12\x1a\n" +
-	"\x16AUTH_TYPE_AUTH_CALLOUT\x10\x06*i\n" +
+	"\x16AUTH_TYPE_AUTH_CALLOUT\x10\x06*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03*\x87\x01\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04*\x87\x01\n" +
 	"\x06Expect\x12\x16\n" +
 	"\x12EXPECT_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rEXPECT_STREAM\x10\x01\x12\x18\n" +

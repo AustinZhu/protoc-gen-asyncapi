@@ -781,6 +781,9 @@ type OpSpec struct {
 	Tags []*asyncapi.Tag
 	// Bindings are protocol bindings of the operation.
 	Bindings *asyncapi.Bindings
+	// IDSuffix is appended to the operation id, for a second operation of
+	// the same rpc (e.g. ".output" of a processor).
+	IDSuffix string
 }
 
 // AddOperation creates an operation for an rpc, applying the
@@ -788,7 +791,7 @@ type OpSpec struct {
 func (b *Builder) AddOperation(spec OpSpec) (*Op, error) {
 	m, s := spec.Method, spec.Service
 	opt, svcOpt := OperationOptions(m), ServiceOptions(s)
-	id := firstNonEmpty(opt.GetOperationId(), spec.DefaultID)
+	id := firstNonEmpty(opt.GetOperationId(), spec.DefaultID) + spec.IDSuffix
 	if !asyncapi.KeyPattern.MatchString(id) {
 		return nil, Errorf(m.Desc, "operation id %q is invalid (allowed: letters, digits, '.', '_' and '-')", id)
 	}

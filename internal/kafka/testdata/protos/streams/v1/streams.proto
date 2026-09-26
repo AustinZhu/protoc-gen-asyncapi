@@ -1,0 +1,72 @@
+// How rpc shapes map onto AsyncAPI operations.
+syntax = "proto3";
+
+package streams.v1;
+
+import "google/protobuf/empty.proto";
+import "kafka/asyncapi/v1/annotations.proto";
+
+// Rpc shapes.
+service Shapes {
+  option (kafka.asyncapi.v1.service) = {topic_prefix: "shapes" group_id: "shapes" client_id: "shapes"};
+
+  // A request answered by a stream of results: request/reply, as the number
+  // of replies is not an AsyncAPI concept.
+  rpc Search(Query) returns (stream Hit) {
+    option (kafka.asyncapi.v1.operation) = {topic: "search" reply_topic: "search.results" reply_messages: ["streams.v1.SearchDone"]};
+  }
+
+  // A stream processor: receives readings and sends enriched ones.
+  rpc Enrich(stream Reading) returns (stream Enriched) {
+    option (kafka.asyncapi.v1.operation) = {topic: "readings"};
+  }
+
+  // A processor with its own output and settings for both sides.
+  rpc Normalize(stream Reading) returns (stream Enriched) {
+    option (kafka.asyncapi.v1.operation) = {
+      topic: "raw"
+      output: "normalized"
+      produce: {acks: ACKS_ALL idempotent: true transactional_id: "normalizer"}
+      consume: {read_committed: true auto_offset_reset: OFFSET_RESET_EARLIEST}
+    };
+  }
+
+  // A unary rpc declared as a processor.
+  rpc Convert(Reading) returns (Enriched) {
+    option (kafka.asyncapi.v1.operation) = {pattern: PATTERN_PROCESS topic: "convert"};
+  }
+
+  // Still a publication: no request.
+  rpc Ticks(google.protobuf.Empty) returns (stream Hit) {
+    option (kafka.asyncapi.v1.operation) = {topic: "ticks"};
+  }
+
+  // A stream of requests without response: a subscription.
+  rpc Ingest(stream Reading) returns (google.protobuf.Empty) {
+    option (kafka.asyncapi.v1.operation) = {topic: "ingest"};
+  }
+}
+
+message Query {
+  string text = 1;
+}
+
+message Hit {
+  string id = 1;
+}
+
+// Ends a search.
+message SearchDone {
+  int32 total = 1;
+}
+
+message Reading {
+  string sensor = 1;
+  double value = 2;
+}
+
+message Enriched {
+  string sensor = 1;
+  double value = 2;
+  string unit = 3;
+}

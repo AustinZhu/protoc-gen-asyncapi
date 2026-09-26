@@ -99,9 +99,15 @@ func (Encoding) EnumDescriptor() ([]byte, []int) {
 }
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -112,6 +118,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service consumes messages.
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -121,12 +131,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -1336,6 +1348,9 @@ type Operation struct {
 	// REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
 	// an error message.
 	ReplyMessages []string `protobuf:"bytes,7,rep,name=reply_messages,json=replyMessages,proto3" json:"reply_messages,omitempty"`
+	// PROCESS: Topic ID the output is published to, relative to the service's
+	// topic_prefix. Defaults to the input topic followed by ".output".
+	Output        string `protobuf:"bytes,8,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1417,6 +1432,13 @@ func (x *Operation) GetReplyMessages() []string {
 		return x.ReplyMessages
 	}
 	return nil
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
 }
 
 // Publish holds publisher settings.
@@ -1835,7 +1857,7 @@ const file_googlepubsub_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x10use_topic_schema\x18\x02 \x01(\bR\x0euseTopicSchema\"P\n" +
 	"\aService\x12!\n" +
 	"\ftopic_prefix\x18\x01 \x01(\tR\vtopicPrefix\x12\"\n" +
-	"\fsubscription\x18\x02 \x01(\tR\fsubscription\"\xc4\x02\n" +
+	"\fsubscription\x18\x02 \x01(\tR\fsubscription\"\xdc\x02\n" +
 	"\tOperation\x12;\n" +
 	"\apattern\x18\x01 \x01(\x0e2!.googlepubsub.asyncapi.v1.PatternR\apattern\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\"\n" +
@@ -1844,7 +1866,8 @@ const file_googlepubsub_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\aconsume\x18\x05 \x01(\v2!.googlepubsub.asyncapi.v1.ConsumeR\aconsume\x12\x1f\n" +
 	"\vreply_topic\x18\x06 \x01(\tR\n" +
 	"replyTopic\x12%\n" +
-	"\x0ereply_messages\x18\a \x03(\tR\rreplyMessages\"\xe2\x02\n" +
+	"\x0ereply_messages\x18\a \x03(\tR\rreplyMessages\x12\x16\n" +
+	"\x06output\x18\b \x01(\tR\x06output\"\xe2\x02\n" +
 	"\aPublish\x12!\n" +
 	"\fordering_key\x18\x01 \x01(\tR\vorderingKey\x12Q\n" +
 	"\n" +
@@ -1875,12 +1898,13 @@ const file_googlepubsub_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\bEncoding\x12\x18\n" +
 	"\x14ENCODING_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rENCODING_JSON\x10\x01\x12\x13\n" +
-	"\x0fENCODING_BINARY\x10\x02*i\n" +
+	"\x0fENCODING_BINARY\x10\x02*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03:^\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04:^\n" +
 	"\bdocument\x12\x1c.google.protobuf.FileOptions\x18\xee\xc7\x03 \x01(\v2\".googlepubsub.asyncapi.v1.DocumentR\bdocument:^\n" +
 	"\aservice\x12\x1f.google.protobuf.ServiceOptions\x18\xee\xc7\x03 \x01(\v2!.googlepubsub.asyncapi.v1.ServiceR\aservice:c\n" +
 	"\toperation\x12\x1e.google.protobuf.MethodOptions\x18\xee\xc7\x03 \x01(\v2#.googlepubsub.asyncapi.v1.OperationR\toperation:^\n" +

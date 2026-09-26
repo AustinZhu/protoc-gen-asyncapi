@@ -211,9 +211,15 @@ func (Qos) EnumDescriptor() ([]byte, []int) {
 }
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 type Pattern int32
 
 const (
@@ -225,6 +231,10 @@ const (
 	Pattern_PATTERN_PUBLISH Pattern = 2
 	// The service subscribes to messages.
 	Pattern_PATTERN_SUBSCRIBE Pattern = 3
+	// The service receives the input on the operation's channel and sends the
+	// output (the response) on the output channel, without replying: two
+	// operations, e.g. a stream processor.
+	Pattern_PATTERN_PROCESS Pattern = 4
 )
 
 // Enum value maps for Pattern.
@@ -234,12 +244,14 @@ var (
 		1: "PATTERN_REQUEST_REPLY",
 		2: "PATTERN_PUBLISH",
 		3: "PATTERN_SUBSCRIBE",
+		4: "PATTERN_PROCESS",
 	}
 	Pattern_value = map[string]int32{
 		"PATTERN_UNSPECIFIED":   0,
 		"PATTERN_REQUEST_REPLY": 1,
 		"PATTERN_PUBLISH":       2,
 		"PATTERN_SUBSCRIBE":     3,
+		"PATTERN_PROCESS":       4,
 	}
 )
 
@@ -756,6 +768,9 @@ type Operation struct {
 	// REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
 	// an error message.
 	ReplyMessages []string `protobuf:"bytes,11,rep,name=reply_messages,json=replyMessages,proto3" json:"reply_messages,omitempty"`
+	// PROCESS: Topic the output is published to, relative to the service's
+	// topic_prefix. Defaults to the input topic followed by "/output".
+	Output        string `protobuf:"bytes,12,opt,name=output,proto3" json:"output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -865,6 +880,13 @@ func (x *Operation) GetReplyMessages() []string {
 		return x.ReplyMessages
 	}
 	return nil
+}
+
+func (x *Operation) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
 }
 
 // Message holds MQTT properties of a message, and optionally gives it its
@@ -1035,7 +1057,7 @@ const file_mqtt_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\aService\x12!\n" +
 	"\ftopic_prefix\x18\x01 \x01(\tR\vtopicPrefix\x12'\n" +
 	"\x03qos\x18\x02 \x01(\x0e2\x15.mqtt.asyncapi.v1.QosR\x03qos\x12!\n" +
-	"\fshared_group\x18\x03 \x01(\tR\vsharedGroup\"\xbf\x03\n" +
+	"\fshared_group\x18\x03 \x01(\tR\vsharedGroup\"\xd7\x03\n" +
 	"\tOperation\x123\n" +
 	"\apattern\x18\x01 \x01(\x0e2\x19.mqtt.asyncapi.v1.PatternR\apattern\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12'\n" +
@@ -1049,7 +1071,8 @@ const file_mqtt_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\vreply_topic\x18\n" +
 	" \x01(\tR\n" +
 	"replyTopic\x12%\n" +
-	"\x0ereply_messages\x18\v \x03(\tR\rreplyMessages\"V\n" +
+	"\x0ereply_messages\x18\v \x03(\tR\rreplyMessages\x12\x16\n" +
+	"\x06output\x18\f \x01(\tR\x06output\"V\n" +
 	"\aMessage\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n" +
 	"\x04utf8\x18\x02 \x01(\bR\x04utf8\x12!\n" +
@@ -1068,12 +1091,13 @@ const file_mqtt_asyncapi_v1_annotations_proto_rawDesc = "" +
 	"\x0fQOS_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10QOS_AT_MOST_ONCE\x10\x01\x12\x15\n" +
 	"\x11QOS_AT_LEAST_ONCE\x10\x02\x12\x14\n" +
-	"\x10QOS_EXACTLY_ONCE\x10\x03*i\n" +
+	"\x10QOS_EXACTLY_ONCE\x10\x03*~\n" +
 	"\aPattern\x12\x17\n" +
 	"\x13PATTERN_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PATTERN_REQUEST_REPLY\x10\x01\x12\x13\n" +
 	"\x0fPATTERN_PUBLISH\x10\x02\x12\x15\n" +
-	"\x11PATTERN_SUBSCRIBE\x10\x03*\x9a\x01\n" +
+	"\x11PATTERN_SUBSCRIBE\x10\x03\x12\x13\n" +
+	"\x0fPATTERN_PROCESS\x10\x04*\x9a\x01\n" +
 	"\x0eRetainHandling\x12\x1f\n" +
 	"\x1bRETAIN_HANDLING_UNSPECIFIED\x10\x00\x12%\n" +
 	"!RETAIN_HANDLING_SEND_AT_SUBSCRIBE\x10\x01\x12\x1f\n" +

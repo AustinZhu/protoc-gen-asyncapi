@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/notify/v1/notify.proto"}},
 		{"chat", "", []string{"chat/v1/chat.proto"}},
 		{"chat_client", "perspective=client", []string{"chat/v1/chat.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"jobs", "", []string{"jobs/v1/jobs.proto"}},
 		{"jobs_client", "perspective=client,asyncapi_version=3.0.0", []string{"jobs/v1/jobs.proto"}},
 		{"sessions", "", []string{"sessions/v1/sessions.proto"}},
@@ -56,8 +58,14 @@ message Msg { string id = 1; }
 	cases := []struct {
 		name, param, src, want string
 	}{
-		{"bidi", "", `service S { rpc M(stream Msg) returns (stream Msg) { option (redis.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the Redis pattern of a bidirectional streaming rpc"},
+		{"client stream with response", "", `service S { rpc M(stream Msg) returns (Msg) { option (redis.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (redis.asyncapi.v1.operation).pattern"},
+		{"process with empty", "", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (redis.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", "", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (redis.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"glob output", "", `service S { rpc M(stream Msg) returns (stream Msg) { option (redis.asyncapi.v1.operation) = {output: "a*"}; } }`,
+			`output channel "a*" must not be a glob pattern`},
 		{"whitespace", "", op(`channel: "a b"`), `channel "a b" must not contain whitespace`},
 		{"unmatched brace", "", op(`channel: "a:{id"`), `channel "a:{id" has an unmatched '{'`},
 		{"bad parameter", "", op(`channel: "a:{i.d}"`), `invalid parameter name "i.d"`},

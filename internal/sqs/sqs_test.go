@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/returns/v1/returns.proto"}},
 		{"fulfilment", "", []string{"fulfilment/v1/fulfilment.proto"}},
 		{"fulfilment_client", "perspective=client", []string{"fulfilment/v1/fulfilment.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"fulfilment_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"fulfilment/v1/fulfilment.proto"}},
 	}
 	for _, tc := range cases {
@@ -69,8 +71,14 @@ message Msg { string id = 1; }
 		return `service S { rpc M(google.protobuf.Empty) returns (stream Msg) { option (sqs.asyncapi.v1.operation) = {` + opt + `}; } }`
 	}
 	cases := []struct{ name, src, want string }{
-		{"bidi", `service S { rpc M(stream Msg) returns (stream Msg) { option (sqs.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the SQS pattern of a bidirectional streaming rpc"},
+		{"client stream with response", `service S { rpc M(stream Msg) returns (Msg) { option (sqs.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (sqs.asyncapi.v1.operation).pattern"},
+		{"process with empty", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (sqs.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (sqs.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"fifo output without group", `service S { rpc M(stream Msg) returns (stream Msg) { option (sqs.asyncapi.v1.operation) = {output: "q.fifo"}; } }`,
+			`output: queue "q.fifo" is FIFO: set send.message_group_id`},
 		{"reply without queue", `service S { rpc M(Msg) returns (Msg) { option (sqs.asyncapi.v1.operation) = {}; } }`, "REQUEST_REPLY operations must set reply_queue"},
 		{"reply on publish", pub(`queue: "q", reply_queue: "r"`), "reply_queue and reply_messages are only valid for REQUEST_REPLY operations"},
 		{"unknown reply message", `service S { rpc M(Msg) returns (Msg) { option (sqs.asyncapi.v1.operation) = {reply_queue: "r", reply_messages: ["test.v1.Nope"]}; } }`,

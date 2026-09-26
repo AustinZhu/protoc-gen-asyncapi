@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/sensors/v1/sensors.proto"}},
 		{"devices", "", []string{"iot/v1/devices.proto"}},
 		{"devices_client", "perspective=client", []string{"iot/v1/devices.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"devices_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"iot/v1/devices.proto"}},
 	}
 	for _, tc := range cases {
@@ -74,8 +76,14 @@ option (mqtt.asyncapi.v1.document) = {servers: [{name: "a", ` + fields + `}]};
 	}
 	rpc := `service S { rpc M(Msg) returns (Msg) { option (mqtt.asyncapi.v1.operation) = {}; } }`
 	cases := []struct{ name, src, want string }{
-		{"bidi", `service S { rpc M(stream Msg) returns (stream Msg) { option (mqtt.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the MQTT pattern of a bidirectional streaming rpc"},
+		{"client stream with response", `service S { rpc M(stream Msg) returns (Msg) { option (mqtt.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (mqtt.asyncapi.v1.operation).pattern"},
+		{"process with empty", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (mqtt.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (mqtt.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"wildcard output", `service S { rpc M(stream Msg) returns (stream Msg) { option (mqtt.asyncapi.v1.operation) = {output: "a/+"}; } }`,
+			`output: topic "a/+": wildcards are only valid in subscriptions`},
 		{"hash not last", sub(`topic: "a/#/b"`), `topic "a/#/b": "#" must be the last level`},
 		{"partial wildcard", sub(`topic: "a/b+"`), `wildcard in level "b+" must span the whole level`},
 		{"partial parameter", sub(`topic: "a/x{id}"`), `parameter in level "x{id}" must span the whole level`},

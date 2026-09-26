@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/shipping/v1/shipping.proto"}},
 		{"billing", "", []string{"billing/v1/billing.proto"}},
 		{"billing_client", "perspective=client", []string{"billing/v1/billing.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"billing_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"billing/v1/billing.proto"}},
 	}
 	for _, tc := range cases {
@@ -68,15 +70,23 @@ message Msg { string id = 1; }
 	}
 	const topic = `exchanges: [{name: "ev", type: EXCHANGE_TYPE_TOPIC}]`
 	cases := []struct{ name, src, want string }{
-		{"bidi", `service S { rpc M(stream Msg) returns (stream Msg) { option (amqp.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the AMQP pattern of a bidirectional streaming rpc"},
+		{"client stream with response", `service S { rpc M(stream Msg) returns (Msg) { option (amqp.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (amqp.asyncapi.v1.operation).pattern"},
+		{"process with empty", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (amqp.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (amqp.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"wildcard output", `service S { rpc M(stream Msg) returns (stream Msg) { option (amqp.asyncapi.v1.operation) = {output: "a.*"}; } }`,
+			`output routing key "a.*" must not contain wildcards`},
+		{"process on fanout", topo(`exchanges: [{name: "f", type: EXCHANGE_TYPE_FANOUT}]`) + `service S { rpc M(stream Msg) returns (stream Msg) { option (amqp.asyncapi.v1.operation) = {exchange: "f"}; } }`,
+			`exchange "f" ignores routing keys: the output of a processor would reach its input`},
 		{"undeclared exchange", sub(`exchange: "nope"`), `exchange "nope" is not declared in (amqp.asyncapi.v1.document).exchanges`},
 		{"undeclared service exchange", `service S { option (amqp.asyncapi.v1.service) = {exchange: "nope"}; rpc M(Msg) returns (google.protobuf.Empty); }`,
 			`exchange "nope" is not declared`},
 		{"internal exchange", topo(`exchanges: [{name: "in", internal: true}]`) + sub(`exchange: "in"`), `exchange "in" is internal`},
 		{"default exchange parameters", sub(`routing_key: "a.{id}"`), "the default exchange delivers to the queue named after the routing key, so it cannot have parameters"},
 		{"default exchange queue mismatch", sub(`routing_key: "a", queue: "b"`), `routing key "a" does not reach queue "b"`},
-		{"wildcard on publish", topo(topic) + pub(`exchange: "ev", routing_key: "a.*"`), "wildcards are binding patterns, only valid for SUBSCRIBE operations"},
+		{"wildcard on publish", topo(topic) + pub(`exchange: "ev", routing_key: "a.*"`), "wildcards are binding patterns, only valid for SUBSCRIBE and PROCESS operations"},
 		{"wildcard on direct", topo(`exchanges: [{name: "d"}]`) + sub(`exchange: "d", routing_key: "a.#"`), `wildcards need a topic exchange, "d" is a direct exchange`},
 		{"bad parameter", topo(topic) + sub(`exchange: "ev", routing_key: "a.{b.c}"`), `invalid parameter name "b.c"`},
 		{"unbalanced braces", topo(topic) + sub(`exchange: "ev", routing_key: "a.{b"`), "has unbalanced braces"},

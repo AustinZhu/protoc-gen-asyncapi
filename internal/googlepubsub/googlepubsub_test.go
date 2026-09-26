@@ -28,6 +28,8 @@ func TestGolden(t *testing.T) {
 		{"example", "", []string{"acme/analytics/v1/analytics.proto"}},
 		{"analytics", "", []string{"analytics/v1/analytics.proto"}},
 		{"analytics_client", "perspective=client", []string{"analytics/v1/analytics.proto"}},
+		{"streams", "", []string{"streams/v1/streams.proto"}},
+		{"streams_client", "perspective=client", []string{"streams/v1/streams.proto"}},
 		{"analytics_3.0.0_json", "asyncapi_version=3.0.0,format=json", []string{"analytics/v1/analytics.proto"}},
 	}
 	for _, tc := range cases {
@@ -70,8 +72,14 @@ message Msg { string id = 1; }
 		return doc(`subscriptions: [{name: "sub", topic: "events", ` + fields + `}]`)
 	}
 	cases := []struct{ name, src, want string }{
-		{"bidi", `service S { rpc M(stream Msg) returns (stream Msg) { option (googlepubsub.asyncapi.v1.operation) = {}; } }`,
-			"test.proto:7:13: cannot infer the Pub/Sub pattern of a bidirectional streaming rpc"},
+		{"client stream with response", `service S { rpc M(stream Msg) returns (Msg) { option (googlepubsub.asyncapi.v1.operation) = {}; } }`,
+			"test.proto:7:13: a client streaming rpc with a response has no AsyncAPI form; set (googlepubsub.asyncapi.v1.operation).pattern"},
+		{"process with empty", `service S { rpc M(stream Msg) returns (stream google.protobuf.Empty) { option (googlepubsub.asyncapi.v1.operation) = {}; } }`,
+			"neither may be google.protobuf.Empty"},
+		{"output without process", `service S { rpc M(Msg) returns (google.protobuf.Empty) { option (googlepubsub.asyncapi.v1.operation) = {output: "x"}; } }`,
+			"output is only valid for PROCESS operations"},
+		{"invalid output", `service S { rpc M(stream Msg) returns (stream Msg) { option (googlepubsub.asyncapi.v1.operation) = {output: "goog-x"}; } }`,
+			`"goog-x"`},
 		{"reply without topic", `service S { rpc M(Msg) returns (Msg) { option (googlepubsub.asyncapi.v1.operation) = {}; } }`,
 			"REQUEST_REPLY operations must set reply_topic"},
 		{"reply on publish", pub(`reply_topic: "replies"`), "reply_topic and reply_messages are only valid for REQUEST_REPLY operations"},

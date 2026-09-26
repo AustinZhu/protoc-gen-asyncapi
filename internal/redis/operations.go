@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/asyncapi"
@@ -43,22 +44,28 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 	return nil
 }
 
-// resolvePattern applies the inference rules documented on
-// redis.asyncapi.v1.Pattern.
-func resolvePattern(m *protogen.Method, pat redisv1.Pattern) (redisv1.Pattern, error) {
+// resolvePattern returns the pattern of an rpc: the annotated one, or the
+// one its shape implies.
+func resolvePattern(m *protogen.Method, pat redisv1.Pattern) (redisv1.Pattern, core.Shape, error) {
+	shapes := map[redisv1.Pattern]core.Shape{
+		redisv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		redisv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		redisv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		redisv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
 	if pat != redisv1.Pattern_PATTERN_UNSPECIFIED {
-		return pat, nil
+		return pat, shapes[pat], nil
 	}
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	switch {
-	case in && out:
-		return pat, core.Errorf(m.Desc, "cannot infer the Redis pattern of a bidirectional streaming rpc; set (redis.asyncapi.v1.operation).pattern")
-	case out:
-		return redisv1.Pattern_PATTERN_PUBLISH, nil
-	case in, m.Output.Desc.FullName() == emptyFullName:
-		return redisv1.Pattern_PATTERN_SUBSCRIBE, nil
+	shape, err := core.InferShape(m, "(redis.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
 	}
-	return redisv1.Pattern_PATTERN_REQUEST_REPLY, nil
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
+		}
+	}
+	return pat, shape, nil
 }
 
 // transport resolves the transport of an rpc and its settings.
@@ -89,23 +96,19 @@ func resolveTransport(opt *redisv1.Operation, svc *redisv1.Service, msg *redisv1
 func (p *Protocol) addMethod(s *protogen.Service, svcOpt *redisv1.Service, m *protogen.Method) error {
 	b := p.b
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-
-	var payload, response *protogen.Message
-	switch pattern {
-	case redisv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
-	case redisv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case redisv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
 		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
 	}
+
+	payload, response := core.Payloads(m, shape)
 	msgOpt := messageOptions(payload)
 	tr := resolveTransport(opt, svcOpt, msgOpt)
 
@@ -138,7 +141,7 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *redisv1.Service, m *pr
 		return err
 	}
 	cd := p.chans[ch]
-	if cd.addr.glob && !(tr.kind == kindPubSub && pattern == redisv1.Pattern_PATTERN_SUBSCRIBE) {
+	if cd.addr.glob && !(tr.kind == kindPubSub && (pattern == redisv1.Pattern_PATTERN_SUBSCRIBE || pattern == redisv1.Pattern_PATTERN_PROCESS)) {
 		return core.Errorf(m.Desc, "channel %q: glob patterns are only valid for Pub/Sub subscriptions", name)
 	}
 	msg, err := b.Message(payload)
@@ -147,7 +150,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *redisv1.Service, m *pr
 	}
 	ch.AddMessage(msg)
 
-	x, err := p.operationBinding(m, svcOpt, tr, cd, ch, action, msg)
+	inTr, outTr := tr, tr
+	if shape == core.ShapeProcess {
+		inTr, outTr = splitTransport(tr)
+	}
+	x, err := p.operationBinding(m, svcOpt, inTr, cd, ch, action, msg)
 	if err != nil {
 		return err
 	}
@@ -164,6 +171,11 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *redisv1.Service, m *pr
 		return err
 	}
 
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, outTr, ch, action, response); err != nil {
+			return err
+		}
+	}
 	if pattern == redisv1.Pattern_PATTERN_REQUEST_REPLY {
 		return p.addReply(op, ch, m, opt, svcOpt, tr, response)
 	}
@@ -589,4 +601,63 @@ func (p *Protocol) addKeyspace(s *protogen.Service, svcOpt *redisv1.Service, k *
 		}, ch, payload)
 	}
 	return nil
+}
+
+// splitTransport splits the transport settings of a processor: the input
+// keeps the consumer settings, the output the producer ones.
+func splitTransport(tr transport) (in, out transport) {
+	in, out = tr, tr
+	if st := tr.stream; st != nil {
+		in.stream = proto.Clone(st).(*redisv1.Stream)
+		in.stream.Trim, in.stream.NoMkstream = nil, false
+		out.stream = &redisv1.Stream{Trim: st.GetTrim(), NoMkstream: st.GetNoMkstream(), Field: st.GetField(), Flatten: st.GetFlatten()}
+	}
+	if l := tr.list; l != nil {
+		in.list = &redisv1.List{Push: l.GetPush(), Pop: l.GetPop(), Block: l.GetBlock(), ProcessingList: l.GetProcessingList()}
+		out.list = &redisv1.List{Push: l.GetPush(), MaxLen: l.GetMaxLen()}
+	}
+	return in, out
+}
+
+// addOutput adds the operation sending a processor's output: the opposite
+// action of its input, on the output channel, with the same transport.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *redisv1.Service, m *protogen.Method, opt *redisv1.Operation, tr transport, in *core.Channel, inAction asyncapi.Action, output *protogen.Message) error {
+	name := *in.Obj.Address + ":output"
+	if opt.GetOutput() != "" {
+		name = joinKey(svcOpt.GetKeyPrefix(), opt.GetOutput())
+	}
+	ch, err := p.channel(m.Desc, name, tr.kind, core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	cd := p.chans[ch]
+	if cd.addr.glob {
+		return core.Errorf(m.Desc, "output channel %q must not be a glob pattern", name)
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	// The service's consumer group is the input's; the output's consumers
+	// are the service's callers.
+	x, err := p.operationBinding(m, &redisv1.Service{KeyPrefix: svcOpt.GetKeyPrefix()}, tr, cd, ch, action, msg)
+	if err != nil {
+		return err
+	}
+	_, err = p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+		Bindings:  asyncapi.NewBindings(BindingKey, x),
+	})
+	return err
 }

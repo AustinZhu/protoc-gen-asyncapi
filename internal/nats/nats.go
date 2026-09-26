@@ -262,46 +262,43 @@ func (p *Protocol) AddService(b *core.Builder, s *protogen.Service) error {
 
 // resolvePattern applies the inference rules documented on
 // nats.asyncapi.v1.Pattern.
-func resolvePattern(m *protogen.Method, pat natsv1.Pattern) (natsv1.Pattern, error) {
-	in, out := m.Desc.IsStreamingClient(), m.Desc.IsStreamingServer()
-	if pat == natsv1.Pattern_PATTERN_UNSPECIFIED {
-		switch {
-		case in && out:
-			return pat, core.Errorf(m.Desc, "cannot infer the NATS pattern of a bidirectional streaming method; set (nats.asyncapi.v1.operation).pattern")
-		case out:
-			return natsv1.Pattern_PATTERN_PUBLISH, nil
-		case in:
-			return natsv1.Pattern_PATTERN_SUBSCRIBE, nil
-		case m.Output.Desc.FullName() == emptyFullName:
-			return natsv1.Pattern_PATTERN_SUBSCRIBE, nil
-		default:
-			return natsv1.Pattern_PATTERN_REQUEST_REPLY, nil
+func resolvePattern(m *protogen.Method, pat natsv1.Pattern) (natsv1.Pattern, core.Shape, error) {
+	shapes := map[natsv1.Pattern]core.Shape{
+		natsv1.Pattern_PATTERN_REQUEST_REPLY: core.ShapeRequestReply,
+		natsv1.Pattern_PATTERN_PUBLISH:       core.ShapePublish,
+		natsv1.Pattern_PATTERN_SUBSCRIBE:     core.ShapeSubscribe,
+		natsv1.Pattern_PATTERN_PROCESS:       core.ShapeProcess,
+	}
+	if pat != natsv1.Pattern_PATTERN_UNSPECIFIED {
+		return pat, shapes[pat], nil
+	}
+	shape, err := core.InferShape(m, "(nats.asyncapi.v1.operation)")
+	if err != nil {
+		return pat, 0, err
+	}
+	for p, s := range shapes {
+		if s == shape {
+			pat = p
 		}
 	}
-	return pat, nil
+	return pat, shape, nil
 }
 
 func (p *Protocol) addMethod(s *protogen.Service, svcOpt *natsv1.Service, m *protogen.Method) error {
 	b := p.b
 	opt := operationOptions(m)
-	pattern, err := resolvePattern(m, opt.GetPattern())
+	pattern, shape, err := resolvePattern(m, opt.GetPattern())
 	if err != nil {
 		return err
 	}
-
-	// Pick the payload.
-	var payload, response *protogen.Message
-	switch pattern {
-	case natsv1.Pattern_PATTERN_REQUEST_REPLY:
-		payload, response = m.Input, m.Output
-	case natsv1.Pattern_PATTERN_SUBSCRIBE:
-		payload = m.Input
-	case natsv1.Pattern_PATTERN_PUBLISH:
-		payload = m.Input
-		if m.Desc.IsStreamingServer() || m.Input.Desc.FullName() == emptyFullName {
-			payload = m.Output
+	if shape == core.ShapeProcess {
+		if err := core.CheckProcess(m); err != nil {
+			return err
 		}
+	} else if opt.GetOutput() != "" {
+		return core.Errorf(m.Desc, "output is only valid for PROCESS operations")
 	}
+	payload, response := core.Payloads(m, shape)
 
 	// The service is the receiver of requests and subscriptions and the
 	// sender of publications; the client perspective flips this.
@@ -359,6 +356,12 @@ func (p *Protocol) addMethod(s *protogen.Service, svcOpt *natsv1.Service, m *pro
 		}
 	} else if opt.GetReplySubject() != "" || len(opt.GetReplyMessages()) > 0 {
 		return core.Errorf(m.Desc, "reply_subject and reply_messages are only valid for REQUEST_REPLY operations")
+	}
+
+	if shape == core.ShapeProcess {
+		if err := p.addOutput(s, svcOpt, m, opt, ch, action, response); err != nil {
+			return err
+		}
 	}
 
 	if mo := svcOpt.GetMicro(); mo != nil && pattern == natsv1.Pattern_PATTERN_REQUEST_REPLY {
@@ -533,5 +536,48 @@ func (p *Protocol) addReply(op *core.Op, ch *core.Channel, m *protogen.Method, o
 	if svcOpt.GetMicro() != nil {
 		b.AddReplyMessage(op, reply, p.microErrorMessage())
 	}
+	return nil
+}
+
+// addOutput adds the operation sending a processor's output: the opposite
+// action of its input, on the output subject.
+func (p *Protocol) addOutput(s *protogen.Service, svcOpt *natsv1.Service, m *protogen.Method, opt *natsv1.Operation, in *core.Channel, inAction asyncapi.Action, output *protogen.Message) error {
+	address := *in.Obj.Address + ".output"
+	if opt.GetOutput() != "" {
+		prefix := svcOpt.GetSubjectPrefix()
+		if prefix == "" && svcOpt.GetMicro() != nil {
+			prefix = svcOpt.GetMicro().GetGroup()
+		}
+		address = joinSubject(prefix, opt.GetOutput())
+	}
+	ch, err := p.channel(m.Desc, address, "", core.ChannelSpec{Servers: core.ChannelServers(s, m)})
+	if err != nil {
+		return err
+	}
+	if sub := p.chans[ch].subject; sub != nil && strings.ContainsAny(sub.raw, "*>") {
+		return core.Errorf(m.Desc, "output subject %q must not contain wildcards", address)
+	}
+	msg, err := p.b.Message(output)
+	if err != nil {
+		return err
+	}
+	ch.AddMessage(msg)
+	action := asyncapi.ActionReceive
+	if inAction == asyncapi.ActionReceive {
+		action = asyncapi.ActionSend
+	}
+	op, err := p.b.AddOperation(core.OpSpec{
+		Service:   s,
+		Method:    m,
+		DefaultID: string(s.Desc.Name()) + "." + string(m.Desc.Name()),
+		IDSuffix:  ".output",
+		Action:    action,
+		Channel:   ch,
+		Payload:   msg,
+	})
+	if err != nil {
+		return err
+	}
+	p.ops[op] = opt
 	return nil
 }

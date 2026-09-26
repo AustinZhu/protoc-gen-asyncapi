@@ -184,9 +184,15 @@ message Service {
 // ---------------------------------------------------------------------------
 
 // Pattern is the messaging pattern of an rpc. When unspecified it is
-// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
-// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
-// are REQUEST_REPLY.
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
+//
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 enum Pattern {
   PATTERN_UNSPECIFIED = 0;
   // The service receives requests and sends each reply to reply_queue.
@@ -195,6 +201,10 @@ enum Pattern {
   PATTERN_PUBLISH = 2;
   // The service receives messages.
   PATTERN_SUBSCRIBE = 3;
+  // The service receives the input on the operation's channel and sends the
+  // output (the response) on the output channel, without replying: two
+  // operations, e.g. a stream processor.
+  PATTERN_PROCESS = 4;
 }
 
 // Operation describes the SQS operation of an rpc.
@@ -214,6 +224,10 @@ message Operation {
   // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
   // an error message.
   repeated string reply_messages = 6;
+  // PROCESS: Queue the output is sent to, after the service's queue_prefix.
+  // Defaults to the input queue followed by "-output" (before any ".fifo"
+  // suffix).
+  string output = 7;
 }
 
 // Send holds SendMessage settings.

@@ -149,13 +149,16 @@ message Micro {
 // Method (operation) level
 // ---------------------------------------------------------------------------
 
-// Pattern tells how a method maps onto NATS messaging.
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred from the rpc's shape, which only picks core AsyncAPI operations:
 //
-// When unspecified it is inferred from the method signature:
-//   rpc A(Req) returns (Res)                    -> REQUEST_REPLY
-//   rpc B(Event) returns (google.protobuf.Empty) -> SUBSCRIBE
-//   rpc C(Event) returns (stream ...)           -> PUBLISH (payload is the output)
-//   rpc D(stream Event) returns (...)           -> SUBSCRIBE
+//   - an rpc with a response, streaming or not, is REQUEST_REPLY;
+//   - a server streaming rpc without request (google.protobuf.Empty)
+//     PUBLISHes;
+//   - an rpc returning google.protobuf.Empty SUBSCRIBEs;
+//   - a bidirectional streaming rpc is a PROCESS.
+//
+// A client streaming rpc with a response must set the pattern.
 enum Pattern {
   PATTERN_UNSPECIFIED = 0;
   // The service receives the request and replies with the response.
@@ -165,6 +168,10 @@ enum Pattern {
   PATTERN_PUBLISH = 2;
   // The service subscribes to (or consumes) the input message.
   PATTERN_SUBSCRIBE = 3;
+  // The service receives the input on the operation's channel and sends the
+  // output (the response) on the output channel, without replying: two
+  // operations, e.g. a stream processor.
+  PATTERN_PROCESS = 4;
 }
 
 // Operation describes a NATS operation.
@@ -192,6 +199,10 @@ message Operation {
   Consumer consumer = 8;
   // JetStream publish behaviour.
   Publish publish = 9;
+  // PROCESS: Subject the output is published to, joined to
+  // Service.subject_prefix. Defaults to the input subject followed by
+  // ".output".
+  string output = 10;
 }
 
 // Publish describes how messages are published to JetStream.
