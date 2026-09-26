@@ -1,0 +1,132 @@
+// Warehouse sensors for the ACME shop, on MQTT 5.
+//
+// Sensors publish readings and retained status; the monitoring service
+// ingests readings through a shared subscription, raises alarms, and
+// calibrates sensors with MQTT 5 request/response.
+syntax = "proto3";
+
+package acme.sensors.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "mqtt/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Warehouse Sensors"
+    version: "1.0.0"
+    contact: {
+      name: "Facilities team"
+      email: "facilities@acme.example"
+    }
+  }
+  id: "urn:acme:sensors"
+  servers: [
+    {
+      name: "production"
+      host: "mqtt.acme.example:8883"
+      protocol: "secure-mqtt"
+      description: "MQTT 5 broker."
+      security: ["device"]
+    },
+    {
+      name: "local"
+      host: "localhost:1883"
+      description: "`mosquitto` on your machine."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "device"
+      description: "Per-device client certificates."
+    }
+  ]
+};
+option (mqtt.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "production"
+      version: VERSION_5
+      client_id: "monitor-{instance}"
+      clean_start: false
+      keep_alive: "30s"
+      session_expiry: "1h"
+      last_will: {
+        topic: "warehouse/monitors/{instance}/status"
+        qos: QOS_AT_LEAST_ONCE
+        message: "offline"
+        retain: true
+      }
+    }
+  ]
+  auth: [
+    {
+      scheme: "device"
+      method: AUTH_METHOD_CLIENT_CERTIFICATE
+    }
+  ]
+};
+
+// Warehouse monitoring.
+service Monitor {
+  option (mqtt.asyncapi.v1.service) = {
+    topic_prefix: "warehouse"
+    qos: QOS_AT_LEAST_ONCE
+    shared_group: "monitor"
+  };
+
+  // Ingests the readings of every sensor.
+  rpc Ingest(Reading) returns (google.protobuf.Empty) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{site}/sensors/{sensor_id}/readings"
+      retain_handling: RETAIN_HANDLING_DO_NOT_SEND
+    };
+  }
+
+  // Raises an alarm when a reading is out of range.
+  rpc Alarms(google.protobuf.Empty) returns (stream Alarm) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{site}/alarms"
+      qos: QOS_EXACTLY_ONCE
+      message_expiry: "24h"
+    };
+  }
+
+  // Calibrates a sensor; the sensor answers on the requester's response
+  // topic.
+  rpc Calibrate(CalibrationRequest) returns (CalibrationResult) {
+    option (mqtt.asyncapi.v1.operation) = {topic: "{site}/sensors/{sensor_id}/calibrate"};
+  }
+}
+
+// A sensor reading.
+message Reading {
+  option (mqtt.asyncapi.v1.message) = {
+    utf8: true
+    content_type: "application/json"
+  };
+
+  string site = 1;
+  string sensor_id = 2;
+  double temperature_c = 3;
+  double humidity = 4;
+  google.protobuf.Timestamp read_at = 5;
+}
+
+// An out-of-range reading.
+message Alarm {
+  string site = 1;
+  string sensor_id = 2;
+  string reason = 3;
+}
+
+message CalibrationRequest {
+  string site = 1;
+  string sensor_id = 2;
+  double offset_c = 3;
+}
+
+message CalibrationResult {
+  bool applied = 1;
+}

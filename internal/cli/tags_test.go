@@ -11,6 +11,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/googlepubsub"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/kafka"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/mqtt"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
@@ -26,6 +27,7 @@ import "amqp/asyncapi/v1/annotations.proto";
 import "google/protobuf/empty.proto";
 import "googlepubsub/asyncapi/v1/annotations.proto";
 import "kafka/asyncapi/v1/annotations.proto";
+import "mqtt/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -39,6 +41,7 @@ option (asyncapi.v3.document) = {
     {name: "rabbitmq", host: "rabbitmq:5672", protocol: "amqp"},
     {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
     {name: "kafka", host: "kafka:9092", protocol: "kafka"},
+    {name: "mqtt", host: "mqtt:1883", protocol: "mqtt"},
     {name: "temporal", host: "temporal:7233", protocol: "temporal"}
   ]
 };
@@ -92,6 +95,13 @@ service Ledger {
   rpc Post(google.protobuf.Empty) returns (stream M) { option (kafka.asyncapi.v1.operation) = {}; }
 }
 
+// Sensors on MQTT.
+service Sensors {
+  option (asyncapi.v3.service) = {tags: [{name: "iot"}]};
+  // Reads.
+  rpc Read(google.protobuf.Empty) returns (stream M) { option (mqtt.asyncapi.v1.operation) = {}; }
+}
+
 message M { string id = 1; }
 `
 
@@ -140,7 +150,7 @@ func (d tagDoc) infoTags() string {
 }
 
 func TestWithoutDefaultTags(t *testing.T) {
-	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks,Ledger"
+	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks,Ledger,Sensors"
 	for _, tc := range []struct {
 		param string
 		ops   map[string]string
@@ -160,6 +170,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Billing.Charge":     "Billing,payments",
 				"Clicks.Track":       "Clicks,analytics",
 				"Ledger.Post":        "Ledger,accounting",
+				"Sensors.Read":       "Sensors,iot",
 			},
 			info: withDefaults,
 		},
@@ -177,6 +188,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Billing.Charge":     "payments",
 				"Clicks.Track":       "analytics",
 				"Ledger.Post":        "accounting",
+				"Sensors.Read":       "iot",
 			},
 			info: "platform,Workflows,workflow:Run,Signals",
 		},
@@ -232,6 +244,7 @@ func TestWithoutDefaultTagsEveryPlugin(t *testing.T) {
 		{amqp.Plugin, "Billing.Charge", "payments"},
 		{googlepubsub.Plugin, "Clicks.Track", "analytics"},
 		{kafka.Plugin, "Ledger.Post", "accounting"},
+		{mqtt.Plugin, "Sensors.Read", "iot"},
 		{nats.Plugin, "Api.Get", "reads"},
 		{redis.Plugin, "Cache.Invalidate", "Cache"},
 		{temporal.Plugin, "workflow.Run", "Workflows"},

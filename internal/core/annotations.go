@@ -18,6 +18,7 @@ import (
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/amqp/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/googlepubsub/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/kafka/asyncapi/v1"
+	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/mqtt/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/nats/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/redis/asyncapi/v1"
 	_ "github.com/AustinZhu/protoc-gen-asyncapi/pb/temporal/asyncapi/v1"

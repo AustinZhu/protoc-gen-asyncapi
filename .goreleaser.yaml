@@ -28,6 +28,10 @@ builds:
     main: ./cmd/protoc-gen-kafka-asyncapi
     binary: protoc-gen-kafka-asyncapi
   - <<: *build
+    id: protoc-gen-mqtt-asyncapi
+    main: ./cmd/protoc-gen-mqtt-asyncapi
+    binary: protoc-gen-mqtt-asyncapi
+  - <<: *build
     id: protoc-gen-nats-asyncapi
     main: ./cmd/protoc-gen-nats-asyncapi
     binary: protoc-gen-nats-asyncapi
@@ -66,6 +70,10 @@ archives:
     id: protoc-gen-kafka-asyncapi
     ids: [protoc-gen-kafka-asyncapi]
     name_template: "protoc-gen-kafka-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - <<: *archive
+    id: protoc-gen-mqtt-asyncapi
+    ids: [protoc-gen-mqtt-asyncapi]
+    name_template: "protoc-gen-mqtt-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   - <<: *archive
     id: protoc-gen-nats-asyncapi
     ids: [protoc-gen-nats-asyncapi]

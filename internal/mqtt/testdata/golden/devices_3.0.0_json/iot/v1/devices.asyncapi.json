@@ -1,0 +1,649 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Device fleet",
+    "version": "2.4.0",
+    "description": "A fleet of IoT devices on MQTT.",
+    "tags": [
+      {
+        "name": "Devices",
+        "description": "Device telemetry, status and configuration."
+      },
+      {
+        "name": "Monitor",
+        "description": "Broker monitoring."
+      }
+    ]
+  },
+  "servers": {
+    "broker": {
+      "host": "mqtt.acme.example:8883",
+      "protocol": "secure-mqtt",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/password"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "clientId": "gateway-{gateway_id}",
+          "cleanSession": false,
+          "lastWill": {
+            "topic": "gateways/{gateway_id}/status",
+            "qos": 1,
+            "message": "offline",
+            "retain": true
+          },
+          "keepAlive": 60,
+          "sessionExpiryInterval": 86400,
+          "maximumPacketSize": 262144,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "willDelayInterval": 5,
+            "protocolVersion": "5",
+            "receiveMaximum": 100,
+            "topicAliasMaximum": 10
+          }
+        }
+      }
+    },
+    "legacy": {
+      "host": "mqtt-legacy.acme.example:1883",
+      "protocol": "mqtt",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/cert"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "clientId": "legacy-bridge",
+          "cleanSession": true,
+          "keepAlive": 30,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "protocolVersion": "3.1.1"
+          }
+        }
+      }
+    },
+    "scram": {
+      "host": "mqtt.acme.example:8884",
+      "protocol": "secure-mqtt",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/scram"
+        }
+      ]
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "devices.device_id.telemetry": {
+      "address": "devices/{device_id}/telemetry",
+      "messages": {
+        "iot.v1.Reading": {
+          "$ref": "#/components/messages/iot.v1.Reading"
+        }
+      },
+      "parameters": {
+        "device_id": {
+          "location": "$message.payload#/deviceId"
+        }
+      }
+    },
+    "devices.device_id.status": {
+      "address": "devices/{device_id}/status",
+      "messages": {
+        "iot.v1.DeviceStatus": {
+          "$ref": "#/components/messages/iot.v1.DeviceStatus"
+        }
+      },
+      "parameters": {
+        "device_id": {
+          "location": "$message.payload#/deviceId"
+        }
+      }
+    },
+    "devices.any.alerts.all": {
+      "address": "devices/+/alerts/#",
+      "messages": {
+        "iot.v1.Alert": {
+          "$ref": "#/components/messages/iot.v1.Alert"
+        }
+      }
+    },
+    "devices.device_id.config.set": {
+      "address": "devices/{device_id}/config/set",
+      "messages": {
+        "iot.v1.ConfigRequest": {
+          "$ref": "#/components/messages/iot.v1.ConfigRequest"
+        }
+      },
+      "parameters": {
+        "device_id": {
+          "location": "$message.payload#/deviceId"
+        }
+      }
+    },
+    "devices.device_id.config.ack": {
+      "address": "devices/{device_id}/config/ack",
+      "messages": {
+        "iot.v1.ConfigAck": {
+          "$ref": "#/components/messages/iot.v1.ConfigAck"
+        }
+      },
+      "parameters": {
+        "device_id": {
+          "location": "$message.payload#/deviceId"
+        }
+      }
+    },
+    "devices.device_id.ping": {
+      "address": "devices/{device_id}/ping",
+      "messages": {
+        "iot.v1.PingRequest": {
+          "$ref": "#/components/messages/iot.v1.PingRequest"
+        }
+      },
+      "parameters": {
+        "device_id": {
+          "location": "$message.payload#/deviceId"
+        }
+      }
+    },
+    "devices.device_id.ping.reply": {
+      "address": null,
+      "messages": {
+        "iot.v1.Pong": {
+          "$ref": "#/components/messages/iot.v1.Pong"
+        },
+        "iot.v1.DeviceError": {
+          "$ref": "#/components/messages/iot.v1.DeviceError"
+        }
+      },
+      "description": "Responses to requests published on `devices/{device_id}/ping`, published to the Response Topic chosen by each requester."
+    },
+    "SYS.broker.clients.connected": {
+      "address": "$SYS/broker/clients/connected",
+      "messages": {
+        "iot.v1.ClientCount": {
+          "$ref": "#/components/messages/iot.v1.ClientCount"
+        }
+      }
+    },
+    "announcements": {
+      "address": "announcements",
+      "messages": {
+        "iot.v1.Announcement": {
+          "$ref": "#/components/messages/iot.v1.Announcement"
+        }
+      }
+    }
+  },
+  "operations": {
+    "Devices.Telemetry": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/devices.device_id.telemetry"
+      },
+      "summary": "Ingests telemetry, shared by every ingest instance.",
+      "tags": [
+        {
+          "name": "Devices"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 1,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "sharedGroup": "ingest",
+            "topicFilter": "$share/ingest/devices/+/telemetry",
+            "retainHandling": 2
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/devices.device_id.telemetry/messages/iot.v1.Reading"
+        }
+      ],
+      "x-protobuf-method": "iot.v1.Devices.Telemetry"
+    },
+    "Devices.Status": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/devices.device_id.status"
+      },
+      "summary": "Publishes the retained status of a device.",
+      "tags": [
+        {
+          "name": "Devices"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 2,
+          "retain": true,
+          "messageExpiryInterval": 86400,
+          "bindingVersion": "0.2.0"
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/devices.device_id.status/messages/iot.v1.DeviceStatus"
+        }
+      ],
+      "x-protobuf-method": "iot.v1.Devices.Status"
+    },
+    "Devices.Alerts": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/devices.any.alerts.all"
+      },
+      "summary": "Receives alerts of every device and severity.",
+      "tags": [
+        {
+          "name": "Devices"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 1,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "sharedGroup": "alerting",
+            "topicFilter": "$share/alerting/devices/+/alerts/#",
+            "retainAsPublished": true
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/devices.any.alerts.all/messages/iot.v1.Alert"
+        }
+      ],
+      "x-protobuf-method": "iot.v1.Devices.Alerts"
+    },
+    "Devices.Configure": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/devices.device_id.config.set"
+      },
+      "summary": "Sets a device's configuration; the device acknowledges on a fixed response topic.",
+      "tags": [
+        {
+          "name": "Devices"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 1,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "sharedGroup": "ingest",
+            "topicFilter": "$share/ingest/devices/+/config/set"
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/devices.device_id.config.set/messages/iot.v1.ConfigRequest"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/devices.device_id.config.ack"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/devices.device_id.config.ack/messages/iot.v1.ConfigAck"
+          }
+        ]
+      },
+      "x-protobuf-method": "iot.v1.Devices.Configure"
+    },
+    "Devices.Ping": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/devices.device_id.ping"
+      },
+      "summary": "Pings a device; each requester chooses its response topic.",
+      "tags": [
+        {
+          "name": "Devices"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 1,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "sharedGroup": "ingest",
+            "topicFilter": "$share/ingest/devices/+/ping"
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/devices.device_id.ping/messages/iot.v1.PingRequest"
+        }
+      ],
+      "reply": {
+        "address": {
+          "description": "The Response Topic property of the request.",
+          "location": "$message.header#/responseTopic"
+        },
+        "channel": {
+          "$ref": "#/channels/devices.device_id.ping.reply"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/devices.device_id.ping.reply/messages/iot.v1.Pong"
+          },
+          {
+            "$ref": "#/channels/devices.device_id.ping.reply/messages/iot.v1.DeviceError"
+          }
+        ]
+      },
+      "x-protobuf-method": "iot.v1.Devices.Ping"
+    },
+    "Monitor.Clients": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/SYS.broker.clients.connected"
+      },
+      "summary": "Tracks connected clients.",
+      "tags": [
+        {
+          "name": "Monitor"
+        }
+      ],
+      "bindings": {
+        "mqtt": {
+          "qos": 0,
+          "bindingVersion": "0.2.0",
+          "x-mqtt": {
+            "topicFilter": "$SYS/broker/clients/connected",
+            "noLocal": true
+          }
+        }
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/SYS.broker.clients.connected/messages/iot.v1.ClientCount"
+        }
+      ],
+      "x-protobuf-method": "iot.v1.Monitor.Clients"
+    }
+  },
+  "components": {
+    "schemas": {
+      "iot.v1.Reading": {
+        "description": "A telemetry reading.",
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "temperatureC": {
+            "type": "number",
+            "format": "double"
+          },
+          "humidity": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "iot.v1.DeviceStatus": {
+        "description": "The status of a device.",
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "firmware": {
+            "type": "string"
+          }
+        }
+      },
+      "iot.v1.Alert": {
+        "description": "An alert.",
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "iot.v1.ConfigRequest": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "reportIntervalS": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "iot.v1.ConfigAck": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "applied": {
+            "type": "boolean"
+          }
+        }
+      },
+      "iot.v1.PingRequest": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          }
+        }
+      },
+      "iot.v1.Pong": {
+        "type": "object",
+        "properties": {
+          "uptimeS": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?[0-9]+$"
+          }
+        }
+      },
+      "iot.v1.DeviceError": {
+        "description": "Error response.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "iot.v1.ClientCount": {
+        "type": "object",
+        "properties": {
+          "connected": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "iot.v1.Announcement": {
+        "description": "A fleet-wide announcement, documented without an rpc.",
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "messages": {
+      "iot.v1.Reading": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.Reading"
+        },
+        "name": "Reading",
+        "summary": "A telemetry reading.",
+        "bindings": {
+          "mqtt": {
+            "payloadFormatIndicator": 1,
+            "contentType": "application/json",
+            "bindingVersion": "0.2.0"
+          }
+        },
+        "x-protobuf-message": "iot.v1.Reading"
+      },
+      "iot.v1.DeviceStatus": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.DeviceStatus"
+        },
+        "name": "DeviceStatus",
+        "summary": "The status of a device.",
+        "x-protobuf-message": "iot.v1.DeviceStatus"
+      },
+      "iot.v1.Alert": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.Alert"
+        },
+        "name": "Alert",
+        "summary": "An alert.",
+        "x-protobuf-message": "iot.v1.Alert"
+      },
+      "iot.v1.ConfigRequest": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.ConfigRequest"
+        },
+        "correlationId": {
+          "description": "The Correlation Data property, copied from the request to its response.",
+          "location": "$message.header#/correlationData"
+        },
+        "name": "ConfigRequest",
+        "bindings": {
+          "mqtt": {
+            "correlationData": {
+              "description": "Correlation Data, returned unchanged in the response.",
+              "type": "string",
+              "format": "binary"
+            },
+            "responseTopic": "devices/{device_id}/config/ack",
+            "bindingVersion": "0.2.0"
+          }
+        },
+        "x-protobuf-message": "iot.v1.ConfigRequest"
+      },
+      "iot.v1.ConfigAck": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.ConfigAck"
+        },
+        "correlationId": {
+          "description": "The Correlation Data property, copied from the request to its response.",
+          "location": "$message.header#/correlationData"
+        },
+        "name": "ConfigAck",
+        "x-protobuf-message": "iot.v1.ConfigAck"
+      },
+      "iot.v1.PingRequest": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.PingRequest"
+        },
+        "correlationId": {
+          "description": "The Correlation Data property, copied from the request to its response.",
+          "location": "$message.header#/correlationData"
+        },
+        "name": "PingRequest",
+        "bindings": {
+          "mqtt": {
+            "correlationData": {
+              "description": "Correlation Data, returned unchanged in the response.",
+              "type": "string",
+              "format": "binary"
+            },
+            "responseTopic": {
+              "description": "Response Topic chosen by the requester.",
+              "type": "string"
+            },
+            "bindingVersion": "0.2.0"
+          }
+        },
+        "x-protobuf-message": "iot.v1.PingRequest"
+      },
+      "iot.v1.Pong": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.Pong"
+        },
+        "correlationId": {
+          "description": "The Correlation Data property, copied from the request to its response.",
+          "location": "$message.header#/correlationData"
+        },
+        "name": "Pong",
+        "x-protobuf-message": "iot.v1.Pong"
+      },
+      "iot.v1.DeviceError": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.DeviceError"
+        },
+        "correlationId": {
+          "description": "The Correlation Data property, copied from the request to its response.",
+          "location": "$message.header#/correlationData"
+        },
+        "name": "DeviceError",
+        "summary": "Error response.",
+        "x-protobuf-message": "iot.v1.DeviceError"
+      },
+      "iot.v1.ClientCount": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.ClientCount"
+        },
+        "name": "ClientCount",
+        "x-protobuf-message": "iot.v1.ClientCount"
+      },
+      "iot.v1.Announcement": {
+        "payload": {
+          "$ref": "#/components/schemas/iot.v1.Announcement"
+        },
+        "name": "Announcement",
+        "summary": "A fleet-wide announcement, documented without an rpc.",
+        "bindings": {
+          "mqtt": {
+            "payloadFormatIndicator": 1,
+            "bindingVersion": "0.2.0"
+          }
+        },
+        "x-protobuf-message": "iot.v1.Announcement"
+      }
+    },
+    "securitySchemes": {
+      "password": {
+        "type": "userPassword",
+        "x-mqtt-auth": "username-password"
+      },
+      "cert": {
+        "type": "X509",
+        "x-mqtt-auth": "client-certificate"
+      },
+      "scram": {
+        "type": "scramSha256",
+        "x-mqtt-auth": "SCRAM-SHA-256"
+      }
+    }
+  }
+}

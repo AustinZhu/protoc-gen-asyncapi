@@ -1,0 +1,239 @@
+// MQTT annotations for protoc-gen-asyncapi (protoc-gen-mqtt-asyncapi).
+//
+// These annotations carry only MQTT concepts: topics and topic filters,
+// QoS and retained messages, shared subscriptions and subscription options,
+// MQTT 5 request/response, and MQTT specifics of connections, servers and
+// authentication. Everything generic (info, servers, security schemes, tags,
+// summaries, examples, headers, ...) uses the asyncapi.v3 annotations
+// (asyncapi/v3/annotations.proto). MQTT 5 user properties are documented as
+// message headers.
+//
+// The generated documents use the official AsyncAPI MQTT bindings (0.2.0);
+// what they do not define is added to them as x-mqtt extensions. Features
+// of MQTT 5 are rejected when every declared server speaks MQTT 3.1.1.
+//
+// A service only needs enough annotations to say "this is an MQTT API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - publish vs. subscribe vs. request/response is inferred from the rpc
+//     shape, as documented on Pattern;
+//   - topics default to "<package>/<service>/<method>" in snake_case, with
+//     the package's dots as levels;
+//   - `{name}` levels in topics are channel parameters, bound to payload
+//     fields with the same name; subscribers match them with "+".
+//
+// Durations are strings in Go syntax, e.g. "30s", "10m", "24h".
+syntax = "proto3";
+
+package mqtt.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/mqtt/asyncapi/v1;mqttv1";
+
+extend google.protobuf.FileOptions {
+  // MQTT specifics of the document: connection and authentication details.
+  Document document = 58370;
+}
+
+extend google.protobuf.ServiceOptions {
+  // MQTT defaults applied to every rpc of the service.
+  Service service = 58370;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the MQTT operation implemented by an rpc.
+  Operation operation = 58370;
+}
+
+extend google.protobuf.MessageOptions {
+  // MQTT properties of a message, and optionally its own topic.
+  Message message = 58370;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the MQTT specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // MQTT details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 1;
+  // Authentication method of security schemes declared in
+  // (asyncapi.v3.document).security_schemes.
+  repeated Auth auth = 2;
+}
+
+// Server adds the connection settings of MQTT clients to a server (a
+// broker) declared with the asyncapi.v3 annotations.
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // MQTT version the clients speak. Defaults to MQTT 5.
+  Version version = 2;
+  // Client identifier, e.g. "sensor-{device_id}".
+  string client_id = 3;
+  // Clean start (MQTT 5) or clean session (MQTT 3.1.1): discard any
+  // previous session. Unset keeps the broker's default of a clean session.
+  optional bool clean_start = 4;
+  // Keep alive interval, at most 65535s, e.g. "60s".
+  string keep_alive = 5;
+  // Session expiry interval (MQTT 5): how long the broker keeps the
+  // session after a disconnect.
+  string session_expiry = 6;
+  // Largest packet in bytes the client accepts.
+  uint32 maximum_packet_size = 7;
+  // Receive maximum (MQTT 5): most unacknowledged QoS 1 and 2 publications
+  // the client accepts.
+  uint32 receive_maximum = 8;
+  // Topic alias maximum (MQTT 5) the client accepts.
+  uint32 topic_alias_maximum = 9;
+  // Last will and testament, published by the broker when the client
+  // disconnects ungracefully.
+  LastWill last_will = 10;
+}
+
+// Version is an MQTT protocol version.
+enum Version {
+  VERSION_UNSPECIFIED = 0;
+  VERSION_3_1_1 = 1;
+  VERSION_5 = 2;
+}
+
+// LastWill is the last will and testament of a client.
+message LastWill {
+  // Topic the will is published to.
+  string topic = 1;
+  Qos qos = 2;
+  // Payload of the will.
+  string message = 3;
+  bool retain = 4;
+  // Will delay interval (MQTT 5): wait this long before publishing.
+  string delay = 5;
+}
+
+// Auth sets the authentication method of a security scheme. The scheme
+// type is derived from it unless the scheme sets one.
+message Auth {
+  // Name of the (asyncapi.v3.document) security scheme.
+  string scheme = 1;
+  AuthMethod method = 2;
+  // ENHANCED: the MQTT 5 authentication method, e.g. "SCRAM-SHA-256".
+  string enhanced_method = 3;
+}
+
+// AuthMethod lists the MQTT authentication methods.
+enum AuthMethod {
+  AUTH_METHOD_UNSPECIFIED = 0;
+  // Username and password in CONNECT (userPassword).
+  AUTH_METHOD_USERNAME_PASSWORD = 1;
+  // TLS client certificates (X509).
+  AUTH_METHOD_CLIENT_CERTIFICATE = 2;
+  // MQTT 5 enhanced authentication with AUTH packets.
+  AUTH_METHOD_ENHANCED = 3;
+}
+
+// Qos is an MQTT quality of service level.
+enum Qos {
+  QOS_UNSPECIFIED = 0;
+  // QoS 0: at most once.
+  QOS_AT_MOST_ONCE = 1;
+  // QoS 1: at least once.
+  QOS_AT_LEAST_ONCE = 2;
+  // QoS 2: exactly once.
+  QOS_EXACTLY_ONCE = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of a service.
+message Service {
+  // Prefix of the topics of the service's rpcs, joined with '/'.
+  string topic_prefix = 1;
+  // Default QoS of the service's operations.
+  Qos qos = 2;
+  // Shared subscription group (MQTT 5) of the service's subscribers, so
+  // instances share the load: "$share/<group>/<filter>".
+  string shared_group = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // MQTT 5 request/response: requests carry a response topic and
+  // correlation data; the service answers on the response topic.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service publishes messages.
+  PATTERN_PUBLISH = 2;
+  // The service subscribes to messages.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the MQTT operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Topic, relative to the service's topic_prefix. Subscribers may use
+  // the "+" and "#" wildcards.
+  string topic = 2;
+  // QoS of publications, or the maximum QoS of subscriptions. Defaults to
+  // the service's.
+  Qos qos = 3;
+  // Publishers: the broker retains the last message of the topic.
+  bool retain = 4;
+  // Publishers (MQTT 5): message expiry interval, e.g. "1h".
+  string message_expiry = 5;
+  // Subscribers: shared subscription group (MQTT 5); defaults to the
+  // service's for its own subscribers.
+  string shared_group = 6;
+  // Subscribers (MQTT 5): when retained messages are sent.
+  RetainHandling retain_handling = 7;
+  // Subscribers (MQTT 5): do not receive the client's own publications.
+  bool no_local = 8;
+  // Subscribers (MQTT 5): keep the retain flag of forwarded messages.
+  bool retain_as_published = 9;
+  // REQUEST_REPLY: the response topic requesters set, relative to the
+  // service's topic_prefix, e.g. "responses/{client_id}". Defaults to a
+  // response topic chosen by each requester.
+  string reply_topic = 10;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 11;
+}
+
+// RetainHandling is the Retain Handling subscription option.
+enum RetainHandling {
+  RETAIN_HANDLING_UNSPECIFIED = 0;
+  // 0: send retained messages at subscribe.
+  RETAIN_HANDLING_SEND_AT_SUBSCRIBE = 1;
+  // 1: send them only for new subscriptions.
+  RETAIN_HANDLING_SEND_IF_NEW = 2;
+  // 2: never send them.
+  RETAIN_HANDLING_DO_NOT_SEND = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message holds MQTT properties of a message, and optionally gives it its
+// own topic, documented even when no rpc uses it.
+message Message {
+  // Topic of the message's own channel.
+  string topic = 1;
+  // Payload format indicator (MQTT 5): the payload is UTF-8 text.
+  bool utf8 = 2;
+  // Content Type property (MQTT 5), e.g. "application/json".
+  string content_type = 3;
+}

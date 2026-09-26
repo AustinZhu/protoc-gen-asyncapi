@@ -1,7 +1,7 @@
 // Order processing that runs on Temporal, publishes events on NATS, queues
 // receipts on Redis and invoices on RabbitMQ, exports analytics to Google
-// Pub/Sub and streams order history to Kafka: six protocols in one AsyncAPI
-// document.
+// Pub/Sub, streams order history to Kafka and notifies the warehouse over
+// MQTT: seven protocols in one AsyncAPI document.
 syntax = "proto3";
 
 package mixed.v1;
@@ -11,6 +11,7 @@ import "asyncapi/v3/annotations.proto";
 import "google/protobuf/empty.proto";
 import "googlepubsub/asyncapi/v1/annotations.proto";
 import "kafka/asyncapi/v1/annotations.proto";
+import "mqtt/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -23,7 +24,8 @@ option (asyncapi.v3.document) = {
     {name: "redis", host: "redis.example:6379", protocol: "redis"},
     {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"},
     {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
-    {name: "kafka", host: "kafka.example:9092", protocol: "kafka"}
+    {name: "kafka", host: "kafka.example:9092", protocol: "kafka"},
+    {name: "mqtt", host: "mqtt.example:1883", protocol: "mqtt"}
   ]
 };
 
@@ -95,6 +97,16 @@ service History {
   // Records completed orders.
   rpc Record(google.protobuf.Empty) returns (stream OrderResult) {
     option (kafka.asyncapi.v1.operation) = {topic: "orders.history"};
+  }
+}
+
+// Warehouse notifications over MQTT.
+service Warehouse {
+  option (asyncapi.v3.service) = {servers: ["mqtt"]};
+
+  // Notifies the warehouse of completed orders.
+  rpc Notify(google.protobuf.Empty) returns (stream OrderResult) {
+    option (mqtt.asyncapi.v1.operation) = {topic: "warehouse/orders"};
   }
 }
 

@@ -1,0 +1,212 @@
+// A fleet of IoT devices on MQTT.
+syntax = "proto3";
+
+package iot.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "mqtt/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Device fleet"
+    version: "2.4.0"
+  }
+  servers: [
+    {
+      name: "broker"
+      host: "mqtt.acme.example:8883"
+      protocol: "secure-mqtt"
+      security: ["password"]
+    },
+    {
+      name: "legacy"
+      host: "mqtt-legacy.acme.example:1883"
+      security: ["cert"]
+    },
+    {
+      name: "scram"
+      host: "mqtt.acme.example:8884"
+      protocol: "secure-mqtt"
+      security: ["scram"]
+    }
+  ]
+  security_schemes: [
+    {name: "password"},
+    {name: "cert"},
+    {name: "scram"}
+  ]
+};
+option (mqtt.asyncapi.v1.document) = {
+  servers: [
+    {
+      name: "broker"
+      version: VERSION_5
+      client_id: "gateway-{gateway_id}"
+      clean_start: false
+      keep_alive: "60s"
+      session_expiry: "24h"
+      maximum_packet_size: 262144
+      receive_maximum: 100
+      topic_alias_maximum: 10
+      last_will: {
+        topic: "gateways/{gateway_id}/status"
+        qos: QOS_AT_LEAST_ONCE
+        message: "offline"
+        retain: true
+        delay: "5s"
+      }
+    },
+    {
+      name: "legacy"
+      version: VERSION_3_1_1
+      client_id: "legacy-bridge"
+      clean_start: true
+      keep_alive: "30s"
+    }
+  ]
+  auth: [
+    {
+      scheme: "password"
+      method: AUTH_METHOD_USERNAME_PASSWORD
+    },
+    {
+      scheme: "cert"
+      method: AUTH_METHOD_CLIENT_CERTIFICATE
+    },
+    {
+      scheme: "scram"
+      method: AUTH_METHOD_ENHANCED
+      enhanced_method: "SCRAM-SHA-256"
+    }
+  ]
+};
+
+// Device telemetry, status and configuration.
+service Devices {
+  option (mqtt.asyncapi.v1.service) = {
+    topic_prefix: "devices"
+    qos: QOS_AT_LEAST_ONCE
+    shared_group: "ingest"
+  };
+
+  // Ingests telemetry, shared by every ingest instance.
+  rpc Telemetry(Reading) returns (google.protobuf.Empty) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{device_id}/telemetry"
+      retain_handling: RETAIN_HANDLING_DO_NOT_SEND
+    };
+  }
+
+  // Publishes the retained status of a device.
+  rpc Status(google.protobuf.Empty) returns (stream DeviceStatus) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{device_id}/status"
+      qos: QOS_EXACTLY_ONCE
+      retain: true
+      message_expiry: "24h"
+    };
+  }
+
+  // Receives alerts of every device and severity.
+  rpc Alerts(Alert) returns (google.protobuf.Empty) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "+/alerts/#"
+      shared_group: "alerting"
+      retain_as_published: true
+    };
+  }
+
+  // Sets a device's configuration; the device acknowledges on a fixed
+  // response topic.
+  rpc Configure(ConfigRequest) returns (ConfigAck) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{device_id}/config/set"
+      reply_topic: "{device_id}/config/ack"
+    };
+  }
+
+  // Pings a device; each requester chooses its response topic.
+  rpc Ping(PingRequest) returns (Pong) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "{device_id}/ping"
+      reply_messages: ["iot.v1.DeviceError"]
+    };
+  }
+}
+
+// Broker monitoring.
+service Monitor {
+  option (mqtt.asyncapi.v1.service) = {qos: QOS_AT_MOST_ONCE};
+
+  // Tracks connected clients.
+  rpc Clients(ClientCount) returns (google.protobuf.Empty) {
+    option (mqtt.asyncapi.v1.operation) = {
+      topic: "$SYS/broker/clients/connected"
+      no_local: true
+    };
+  }
+}
+
+// A telemetry reading.
+message Reading {
+  option (mqtt.asyncapi.v1.message) = {
+    utf8: true
+    content_type: "application/json"
+  };
+
+  string device_id = 1;
+  double temperature_c = 2;
+  double humidity = 3;
+}
+
+// The status of a device.
+message DeviceStatus {
+  string device_id = 1;
+  bool online = 2;
+  string firmware = 3;
+}
+
+// An alert.
+message Alert {
+  string device_id = 1;
+  string severity = 2;
+  string message = 3;
+}
+
+message ConfigRequest {
+  string device_id = 1;
+  int32 report_interval_s = 2;
+}
+
+message ConfigAck {
+  string device_id = 1;
+  bool applied = 2;
+}
+
+message PingRequest {
+  string device_id = 1;
+}
+
+message Pong {
+  int64 uptime_s = 1;
+}
+
+// Error response.
+message DeviceError {
+  string reason = 1;
+}
+
+message ClientCount {
+  int32 connected = 1;
+}
+
+// A fleet-wide announcement, documented without an rpc.
+message Announcement {
+  option (mqtt.asyncapi.v1.message) = {
+    topic: "announcements"
+    utf8: true
+  };
+
+  string text = 1;
+}

@@ -10,6 +10,8 @@ modules:
     name: buf.build/austin-zhu/googlepubsub-asyncapi
   - path: proto/kafka
     name: buf.build/austin-zhu/kafka-asyncapi
+  - path: proto/mqtt
+    name: buf.build/austin-zhu/mqtt-asyncapi
   - path: proto/nats
     name: buf.build/austin-zhu/nats-asyncapi
   - path: proto/redis
@@ -19,6 +21,7 @@ modules:
   - path: examples/amqp/proto
   - path: examples/googlepubsub/proto
   - path: examples/kafka/proto
+  - path: examples/mqtt/proto
   - path: examples/nats/proto
   - path: examples/redis/proto
   - path: examples/temporal/proto
@@ -32,6 +35,7 @@ lint:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
       - examples/kafka/proto/acme
+      - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
@@ -39,6 +43,7 @@ lint:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
       - examples/kafka/proto/acme
+      - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
@@ -46,6 +51,7 @@ lint:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
       - examples/kafka/proto/acme
+      - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme
@@ -53,6 +59,7 @@ lint:
       - examples/amqp/proto/acme
       - examples/googlepubsub/proto/acme
       - examples/kafka/proto/acme
+      - examples/mqtt/proto/acme
       - examples/nats/proto/acme
       - examples/redis/proto/acme
       - examples/temporal/proto/acme

@@ -13,16 +13,18 @@ The repository is one shared core plus one package per protocol:
 | **AMQP** | `amqp/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/amqp-asyncapi`) | AMQP 0-9-1 and RabbitMQ, using the official AsyncAPI AMQP bindings. Covers exchanges (direct, fanout, topic, headers, alternate, delayed, exchange-to-exchange bindings), queues (classic, quorum and stream, with TTLs, length limits, dead-lettering and priorities) and their bindings, publishing (delivery mode, priority, expiration, CC/BCC, confirms), consuming (acks, prefetch, exclusive and stream consumers), RPC over `reply_to` and direct reply-to, and server details (vhost, TLS, heartbeat, SASL mechanism). |
 | **Google Pub/Sub** | `googlepubsub/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/googlepubsub-asyncapi`) | Google Cloud Pub/Sub, using the official AsyncAPI Google Pub/Sub bindings. Covers topics (schemas, retention, storage regions, KMS keys, labels) and subscriptions (pull, push with OIDC or unwrapped delivery, BigQuery and Cloud Storage exports; ordering, exactly-once delivery, filters, dead-lettering, retry, expiration). Publishing covers ordering keys, attributes, batching and compression; subscribing covers flow control and ack deadline extension. Also request/reply over topics, projects and the emulator. |
 | **Kafka** | `kafka/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/kafka-asyncapi`) | Apache Kafka, using the official AsyncAPI Kafka bindings. Covers topics (partitions, replicas, cleanup policy, retention, compaction, min in-sync replicas, compression, broker-side schema validation, any other config), record keys from a field, a message or a schema, schema registry details, producers (acks, idempotence, transactions, compression, batching), consumer groups (offset reset, isolation, static membership, assignment strategy, KIP-848), request/reply over topics, and SASL/mTLS authentication. |
+| **MQTT** | `mqtt/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/mqtt-asyncapi`) | MQTT 3.1.1 and 5, using the official AsyncAPI MQTT bindings. Covers topics and wildcard filters, QoS, retained messages, message expiry, shared subscriptions and subscription options (retain handling, no local, retain as published), MQTT 5 request/response (response topic and correlation data), payload format and content type, client connections (client ID, clean start, keep alive, session expiry, last will, limits), and authentication. |
 | **NATS** | `nats/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/nats-asyncapi`) | Core NATS publish/subscribe, request/reply, queue groups, [NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services, JetStream streams and consumers, KV buckets and object stores. |
 | **Redis** | `redis/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/redis-asyncapi`) | Pub/Sub (plain, pattern and sharded), Streams with consumer groups, trimming, claiming and dead letters, Lists as FIFO, LIFO and reliable queues, keyspace and keyevent notifications, request/reply, and server details (topology, database, TLS, RESP, authentication). |
 | **Temporal** | `temporal/asyncapi/v1/options.proto` (`buf.build/austin-zhu/temporal-asyncapi`) | [Temporal](https://temporal.io) Workflows, Activities, Signals, Queries and Updates, with task queues, timeouts, retry policies and continue-as-new. |
 
-Seven binaries are built from it:
+Eight binaries are built from it:
 
-- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, Google Pub/Sub, Kafka, NATS, Redis
-  and Temporal services.
+- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, Google Pub/Sub, Kafka, MQTT, NATS,
+  Redis and Temporal services.
 - **`protoc-gen-amqp-asyncapi`**, **`protoc-gen-googlepubsub-asyncapi`**, **`protoc-gen-kafka-asyncapi`**,
-  **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document
+  **`protoc-gen-mqtt-asyncapi`**, **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and
+  **`protoc-gen-temporal-asyncapi`** document
   only their own protocol and ignore services annotated for another.
 
 The plugin generates documentation only. It generates no code and never contacts a server.
@@ -40,6 +42,7 @@ go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-redis-asyncap
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-amqp-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-googlepubsub-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-kafka-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-mqtt-asyncapi@latest
 ```
 
 Prebuilt binaries are attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-asyncapi/releases),
@@ -60,6 +63,7 @@ deps:
   - buf.build/austin-zhu/amqp-asyncapi       # amqp.asyncapi.v1
   - buf.build/austin-zhu/googlepubsub-asyncapi  # googlepubsub.asyncapi.v1
   - buf.build/austin-zhu/kafka-asyncapi      # kafka.asyncapi.v1
+  - buf.build/austin-zhu/mqtt-asyncapi       # mqtt.asyncapi.v1
   # pin a release with :v0.3.0
 ```
 
@@ -201,10 +205,27 @@ message StockLevel {
 }
 ```
 
+An MQTT service:
+
+```proto
+import "google/protobuf/empty.proto";
+import "mqtt/asyncapi/v1/annotations.proto";
+
+service Monitor {
+  option (mqtt.asyncapi.v1.service) = {topic_prefix: "warehouse", qos: QOS_AT_LEAST_ONCE, shared_group: "monitor"};
+
+  // Ingests the readings of every sensor.
+  rpc Ingest(Reading) returns (google.protobuf.Empty) {
+    option (mqtt.asyncapi.v1.operation) = {topic: "{site}/sensors/{sensor_id}/readings"};
+  }
+}
+```
+
 [`examples/`](examples) has a complete setup for every protocol and the documents it generates:
 [AMQP](examples/asyncapi/acme/shipping/v1/shipping.asyncapi.yaml),
 [Google Pub/Sub](examples/asyncapi/acme/analytics/v1/analytics.asyncapi.yaml),
 [Kafka](examples/asyncapi/acme/inventory/v1/inventory.asyncapi.yaml),
+[MQTT](examples/asyncapi/acme/sensors/v1/sensors.asyncapi.yaml),
 [NATS](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml),
 [Redis](examples/asyncapi/acme/notify/v1/notify.asyncapi.yaml) and
 [Temporal](examples/asyncapi/acme/shop/v1/orders.asyncapi.yaml).
@@ -486,6 +507,34 @@ without keys on compacted topics, and on idempotent or transactional producers w
 auto-commit or static membership without a consumer group, `min.insync.replicas` above the replication factor,
 and invalid keys.
 
+## MQTT
+
+Documents use only the official AsyncAPI MQTT bindings (0.2.0). What they don't define goes in an `x-mqtt` object
+inside them: subscription options, MQTT 5 connection limits and the protocol version.
+
+**Channels.** Each topic is a channel. Topic levels are separated by `/` and default to
+`<package>/<service>/<rpc>`. A `{name}` level is a channel parameter, and subscribers match it with `+`.
+Publishers `send` to a topic, and subscribers `receive` through a topic filter, which may use `+` and `#`. With
+`perspective=server` the documented service's side is used; `perspective=client` flips it. Subscriptions to `$`
+topics such as `$SYS`, which only the broker publishes, have no client side.
+
+| Annotation | Renders as |
+| --- | --- |
+| `qos` | The operation binding's `qos`: of publications, or the maximum of subscriptions. Defaults to the service's. |
+| `retain`, `message_expiry` | Publisher `retain` and `messageExpiryInterval`. |
+| `shared_group`, `retain_handling`, `no_local`, `retain_as_published` | Subscriber options under `x-mqtt`, with the `topicFilter` to subscribe to, e.g. `$share/monitor/warehouse/+/readings`. The service's `shared_group` applies to its own subscribers. |
+| `reply_topic` | MQTT 5 request/response. The request's message binding gets `responseTopic` and `correlationData`, and the reply goes to the response topic: the one given, or the one each requester chooses. |
+| `(mqtt.asyncapi.v1.message)` | `payloadFormatIndicator` (`utf8`) and `contentType` in the message binding. A `topic` gives the message its own channel. |
+| `(mqtt.asyncapi.v1.document).servers` | The server binding: `clientId`, `cleanSession` (clean start), `keepAlive`, `sessionExpiryInterval`, `lastWill`, `maximumPacketSize`. The protocol version, receive and topic alias maximums, and will delay go under `x-mqtt`. |
+| `(mqtt.asyncapi.v1.document).auth` | Sets the security scheme's type: `userPassword` for username/password, `X509` for client certificates, and `scramSha256`/`scramSha512` for MQTT 5 enhanced authentication with SCRAM. |
+
+MQTT 5 user properties are message headers. When every declared server speaks MQTT 3.1.1, MQTT 5 features fail
+generation with `file:line:column`. So do:
+- wildcards in published topics, and publishing to `$` topics;
+- no-local on shared subscriptions;
+- keep-alive or expiry intervals out of range;
+- a last will on a wildcard topic.
+
 ## How Protobuf maps onto JSON Schema
 
 Schemas describe the canonical **Protobuf JSON** encoding.
@@ -555,8 +604,8 @@ Both overrides must be valid JSON Schema (draft-07). Generation fails with `file
 
 A protocol implements `core.Protocol` (`internal/core/builder.go`): it claims the services it understands and adds
 channels, messages and operations through `core.Builder`. The core handles everything else: documents, servers,
-security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp`, `internal/googlepubsub`, `internal/kafka` and
-`internal/nats`, then register
+security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp`, `internal/googlepubsub`, `internal/kafka`,
+`internal/mqtt` and `internal/nats`, then register
 the protocol in `internal/cli/plugins.go` and give it an annotations module under `proto/`.
 
 ## Development
@@ -579,15 +628,15 @@ Push a `v*` tag, or run the **release** workflow manually with a version. The wo
 failure:
 
 1. Tests and spec validation, as in CI.
-2. For each of `proto/amqp`, `proto/asyncapi`, `proto/googlepubsub`, `proto/kafka`, `proto/nats`, `proto/redis` and
-   `proto/temporal`: `buf lint`, `buf breaking` against the previous
+2. For each of `proto/amqp`, `proto/asyncapi`, `proto/googlepubsub`, `proto/kafka`, `proto/mqtt`, `proto/nats`,
+   `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
-3. GoReleaser publishes the GitHub release and the seven binaries.
-4. The seven annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
+3. GoReleaser publishes the GitHub release and the eight binaries.
+4. The eight annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
    the `main` label, the BSR's default, so unpinned dependencies resolve to it. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the
-`BUF_TOKEN` bot user write access to those seven modules only. The token is passed to `buf push` through the
+`BUF_TOKEN` bot user write access to those eight modules only. The token is passed to `buf push` through the
 environment and is never logged or written to disk.

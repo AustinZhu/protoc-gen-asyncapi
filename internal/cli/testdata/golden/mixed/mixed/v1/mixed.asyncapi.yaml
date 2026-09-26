@@ -7,8 +7,8 @@ info:
   description: |-
     Order processing that runs on Temporal, publishes events on NATS, queues
     receipts on Redis and invoices on RabbitMQ, exports analytics to Google
-    Pub/Sub and streams order history to Kafka: six protocols in one AsyncAPI
-    document.
+    Pub/Sub, streams order history to Kafka and notifies the warehouse over
+    MQTT: seven protocols in one AsyncAPI document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -26,6 +26,8 @@ info:
       description: Analytics, exported to Google Pub/Sub.
     - name: History
       description: Order history, streamed to Kafka.
+    - name: Warehouse
+      description: Warehouse notifications over MQTT.
 servers:
   nats:
     host: nats.example:4222
@@ -46,6 +48,9 @@ servers:
   kafka:
     host: kafka.example:9092
     protocol: kafka
+  mqtt:
+    host: mqtt.example:1883
+    protocol: mqtt
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -148,6 +153,13 @@ channels:
         $ref: '#/components/messages/mixed.v1.OrderResult'
     servers:
       - $ref: '#/servers/kafka'
+  warehouse.orders:
+    address: warehouse/orders
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/mqtt'
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -233,6 +245,19 @@ operations:
     messages:
       - $ref: '#/channels/orders.history/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.History.Record
+  Warehouse.Notify:
+    action: send
+    channel:
+      $ref: '#/channels/warehouse.orders'
+    summary: Notifies the warehouse of completed orders.
+    tags:
+      - name: Warehouse
+    bindings:
+      mqtt:
+        bindingVersion: 0.2.0
+    messages:
+      - $ref: '#/channels/warehouse.orders/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.Warehouse.Notify
 components:
   schemas:
     mixed.v1.Order:
