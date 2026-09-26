@@ -1,0 +1,350 @@
+// Google Cloud Pub/Sub annotations for protoc-gen-asyncapi
+// (protoc-gen-googlepubsub-asyncapi).
+//
+// These annotations carry only Pub/Sub concepts: topics, subscriptions
+// (pull, push, BigQuery and Cloud Storage), publishing and consuming, and
+// Pub/Sub specifics of servers. Everything generic (info, servers, security
+// schemes, tags, summaries, examples, headers, ...) uses the asyncapi.v3
+// annotations (asyncapi/v3/annotations.proto). Message attributes are
+// documented as message headers.
+//
+// The generated documents use the official AsyncAPI Google Pub/Sub
+// bindings (0.2.0) where they apply; everything else is rendered as
+// x-googlepubsub bindings.
+//
+// A service only needs enough annotations to say "this is a Pub/Sub API";
+// everything else is inferred from the Protobuf schema and its comments:
+//
+//   - publish vs. subscribe vs. request/reply is inferred from the rpc
+//     shape, as documented on Pattern;
+//   - topic IDs default to "<package>.<service>.<method>" in snake_case;
+//   - `{name}` placeholders in topic IDs and ordering keys are bound to
+//     payload fields with the same name.
+//
+// Durations are strings in Go syntax, e.g. "10s", "10m", "168h".
+syntax = "proto3";
+
+package googlepubsub.asyncapi.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/AustinZhu/protoc-gen-asyncapi/pb/googlepubsub/asyncapi/v1;googlepubsubv1";
+
+extend google.protobuf.FileOptions {
+  // Pub/Sub specifics of the document: project, servers, topics and
+  // subscriptions.
+  Document document = 58350;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Pub/Sub defaults applied to every rpc of the service.
+  Service service = 58350;
+}
+
+extend google.protobuf.MethodOptions {
+  // Describes the Pub/Sub operation implemented by an rpc.
+  Operation operation = 58350;
+}
+
+extend google.protobuf.MessageOptions {
+  // Pub/Sub properties of a message, and optionally its own topic.
+  Message message = 58350;
+}
+
+// ---------------------------------------------------------------------------
+// Document (file) level
+// ---------------------------------------------------------------------------
+
+// Document holds the Pub/Sub specifics of a document. When several files are
+// merged into one AsyncAPI document, the settings of all files (and of the
+// files they import) are combined.
+message Document {
+  // Google Cloud project of the topics and subscriptions.
+  string project = 1;
+  // Pub/Sub details of servers declared in (asyncapi.v3.document).servers.
+  repeated Server servers = 2;
+  // Topics.
+  repeated Topic topics = 3;
+  // Subscriptions.
+  repeated Subscription subscriptions = 4;
+}
+
+// Server adds Pub/Sub details to a server declared with the asyncapi.v3
+// annotations, e.g. "pubsub.googleapis.com:443", a regional endpoint such as
+// "us-east1-pubsub.googleapis.com:443", or the emulator. They are rendered
+// as the server's x-googlepubsub binding (AsyncAPI reserves the googlepubsub
+// server binding).
+message Server {
+  // Name of the (asyncapi.v3.document) server.
+  string name = 1;
+  // Project; defaults to the document's.
+  string project = 2;
+  // The server is the Pub/Sub emulator (no authentication, no TLS).
+  bool emulator = 3;
+}
+
+// Topic declares a topic.
+message Topic {
+  // Topic ID: 3 to 255 letters, digits and "-_.~+%", starting with a letter
+  // and not with "goog".
+  string name = 1;
+  // Project; defaults to the document's.
+  string project = 2;
+  // Labels.
+  map<string, string> labels = 3;
+  // How long published messages are retained, 10m to 31 days (744h), e.g.
+  // "168h".
+  string message_retention_duration = 4;
+  // Regions where messages may be stored.
+  repeated string allowed_persistence_regions = 5;
+  // Also enforce the allowed regions in transit.
+  bool enforce_in_transit = 6;
+  // Schema published messages are validated against.
+  SchemaSettings schema = 7;
+  // Cloud KMS key protecting the topic's messages
+  // (projects/*/locations/*/keyRings/*/cryptoKeys/*).
+  string kms_key_name = 8;
+  string description = 9;
+}
+
+// SchemaSettings attaches a Pub/Sub schema to a topic.
+message SchemaSettings {
+  // Schema ID, or its full name ("projects/*/schemas/*").
+  string name = 1;
+  // Encoding of published messages.
+  Encoding encoding = 2;
+  // Oldest schema revision messages may use.
+  string first_revision_id = 3;
+  // Newest schema revision messages may use.
+  string last_revision_id = 4;
+}
+
+// Encoding is the encoding of messages validated against a schema.
+enum Encoding {
+  // JSON.
+  ENCODING_UNSPECIFIED = 0;
+  ENCODING_JSON = 1;
+  ENCODING_BINARY = 2;
+}
+
+// Subscription declares a subscription.
+message Subscription {
+  // Subscription ID, with the same rules as topic IDs.
+  string name = 1;
+  // Topic ID of the subscription.
+  string topic = 2;
+  // Project; defaults to the document's.
+  string project = 3;
+  // Time subscribers have to acknowledge a message, 10s to 600s.
+  string ack_deadline = 4;
+  // Keep acknowledged messages for the retention duration (for seek).
+  bool retain_acked_messages = 5;
+  // How long unacknowledged messages are kept, 10m to 7 days (168h).
+  string message_retention_duration = 6;
+  // Labels.
+  map<string, string> labels = 7;
+  // Deliver messages with the same ordering key in order.
+  bool enable_message_ordering = 8;
+  // Delete the subscription after this long without activity (at least
+  // 24h), or "never".
+  string expiration = 9;
+  // Only deliver messages matching this filter, e.g.
+  // `attributes.region = "eu"`.
+  string filter = 10;
+  // Dead-letter policy.
+  DeadLetterPolicy dead_letter_policy = 11;
+  // Redelivery backoff; without it, messages are redelivered immediately.
+  RetryPolicy retry_policy = 12;
+  // Exactly-once delivery (pull subscriptions only).
+  bool enable_exactly_once_delivery = 13;
+  // How messages are delivered; pull when unset.
+  oneof delivery {
+    Push push = 14;
+    BigQuery bigquery = 15;
+    CloudStorage cloud_storage = 16;
+  }
+  string description = 17;
+}
+
+// DeadLetterPolicy forwards undeliverable messages to another topic.
+message DeadLetterPolicy {
+  // Topic ID of the dead-letter topic.
+  string topic = 1;
+  // Delivery attempts before a message is dead-lettered, 5 to 100. Defaults
+  // to 5.
+  int32 max_delivery_attempts = 2;
+}
+
+// RetryPolicy is an exponential redelivery backoff.
+message RetryPolicy {
+  // Between 0 and 600s; defaults to 10s.
+  string minimum_backoff = 1;
+  // Between 0 and 600s; defaults to 600s.
+  string maximum_backoff = 2;
+}
+
+// Push delivers messages to an HTTPS endpoint.
+message Push {
+  // HTTPS endpoint messages are POSTed to.
+  string endpoint = 1;
+  // Authenticate with an OIDC token of this service account.
+  string service_account_email = 2;
+  // Audience of the OIDC token; defaults to the endpoint.
+  string audience = 3;
+  // Deliver the raw message data as the request body instead of the JSON
+  // envelope.
+  bool no_wrapper = 4;
+  // With no_wrapper: write attributes and metadata as HTTP headers.
+  bool write_metadata = 5;
+  // Push attributes, e.g. {"x-goog-version": "v1"}.
+  map<string, string> attributes = 6;
+}
+
+// BigQuery writes messages to a BigQuery table.
+message BigQuery {
+  // Table as "project.dataset.table" or "project:dataset.table".
+  string table = 1;
+  // Map message fields to columns with the topic's schema.
+  bool use_topic_schema = 2;
+  // Map message fields to columns with the table's schema.
+  bool use_table_schema = 3;
+  // Write subscription name, message ID, publish time and attributes.
+  bool write_metadata = 4;
+  // Drop fields the table does not have instead of failing.
+  bool drop_unknown_fields = 5;
+  // Service account writing to the table.
+  string service_account_email = 6;
+}
+
+// CloudStorage writes messages to files in a Cloud Storage bucket.
+message CloudStorage {
+  string bucket = 1;
+  string filename_prefix = 2;
+  string filename_suffix = 3;
+  // Datetime format of file names, e.g. "YYYY-MM-DD/hh_mm_ssZ".
+  string filename_datetime_format = 4;
+  // Longest time before a new file is started, 1m to 10m.
+  string max_duration = 5;
+  // Largest file size in bytes, 1 KiB to 10 GiB.
+  int64 max_bytes = 6;
+  // Most messages per file.
+  int64 max_messages = 7;
+  // File format; text when unset.
+  oneof format {
+    TextConfig text = 8;
+    AvroConfig avro = 9;
+  }
+  // Service account writing to the bucket.
+  string service_account_email = 10;
+}
+
+// TextConfig writes message data as newline-separated text.
+message TextConfig {}
+
+// AvroConfig writes messages as Avro records.
+message AvroConfig {
+  // Write message metadata along with the data.
+  bool write_metadata = 1;
+  // Write the data with the topic's schema.
+  bool use_topic_schema = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Service level
+// ---------------------------------------------------------------------------
+
+// Service holds defaults for every rpc of the service.
+message Service {
+  // Prefix of the topic IDs of the service's rpcs, joined with '.'.
+  string topic_prefix = 1;
+  // Subscription the service consumes from, for rpcs without their own.
+  string subscription = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Operation (rpc) level
+// ---------------------------------------------------------------------------
+
+// Pattern is the messaging pattern of an rpc. When unspecified it is
+// inferred: server streaming rpcs PUBLISH, client streaming rpcs and rpcs
+// returning google.protobuf.Empty SUBSCRIBE, and unary rpcs with a response
+// are REQUEST_REPLY.
+enum Pattern {
+  PATTERN_UNSPECIFIED = 0;
+  // The service consumes requests and publishes each reply to reply_topic.
+  PATTERN_REQUEST_REPLY = 1;
+  // The service publishes messages.
+  PATTERN_PUBLISH = 2;
+  // The service consumes messages.
+  PATTERN_SUBSCRIBE = 3;
+}
+
+// Operation describes the Pub/Sub operation of an rpc.
+message Operation {
+  // Messaging pattern; inferred when unspecified.
+  Pattern pattern = 1;
+  // Topic ID, relative to the service's topic_prefix.
+  string topic = 2;
+  // Subscription consumers read from; defaults to the service's.
+  string subscription = 3;
+  // Publishing settings.
+  Publish publish = 4;
+  // Consuming settings.
+  Consume consume = 5;
+  // REQUEST_REPLY: topic ID replies are published to (required), relative
+  // to the service's topic_prefix. Requests and replies carry a
+  // correlation_id attribute.
+  string reply_topic = 6;
+  // REQUEST_REPLY: additional reply messages (full Protobuf names), e.g.
+  // an error message.
+  repeated string reply_messages = 7;
+}
+
+// Publish holds publisher settings.
+message Publish {
+  // Ordering key of published messages, e.g. "{customer_id}": messages
+  // with the same key are delivered in order to subscriptions with
+  // message ordering.
+  string ordering_key = 1;
+  // Attributes set on every published message.
+  map<string, string> attributes = 2;
+  // Client batching: publish after this many messages.
+  int64 batch_max_messages = 3;
+  // Client batching: publish after this many bytes.
+  int64 batch_max_bytes = 4;
+  // Client batching: publish after this delay, e.g. "10ms".
+  string batch_max_latency = 5;
+  // Compress publish requests (gRPC gzip).
+  bool compression = 6;
+}
+
+// Consume holds subscriber settings.
+message Consume {
+  // Flow control: most unacknowledged messages held by the subscriber.
+  int64 max_outstanding_messages = 1;
+  // Flow control: most unacknowledged bytes held by the subscriber.
+  int64 max_outstanding_bytes = 2;
+  // Longest time the subscriber extends a message's ack deadline, e.g.
+  // "60m".
+  string max_extension = 3;
+  // Receive with synchronous pull instead of streaming pull.
+  bool synchronous_pull = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Message level
+// ---------------------------------------------------------------------------
+
+// Message holds Pub/Sub properties of a message, and optionally gives it
+// its own topic, documented even when no rpc uses it.
+message Message {
+  // Topic ID of the message's own channel.
+  string topic = 1;
+  // Ordering key of the message.
+  string ordering_key = 2;
+  // Attributes every message carries (message binding attributes).
+  map<string, string> attributes = 3;
+  // Pub/Sub schema of the message (message binding schema), ID or full
+  // name.
+  string schema = 4;
+}

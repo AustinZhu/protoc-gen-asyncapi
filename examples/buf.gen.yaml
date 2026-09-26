@@ -3,6 +3,7 @@
 version: v2
 inputs:
   - directory: examples/amqp/proto
+  - directory: examples/googlepubsub/proto
   - directory: examples/nats/proto
   - directory: examples/redis/proto
   - directory: examples/temporal/proto

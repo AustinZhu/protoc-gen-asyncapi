@@ -20,6 +20,10 @@ builds:
     main: ./cmd/protoc-gen-amqp-asyncapi
     binary: protoc-gen-amqp-asyncapi
   - <<: *build
+    id: protoc-gen-googlepubsub-asyncapi
+    main: ./cmd/protoc-gen-googlepubsub-asyncapi
+    binary: protoc-gen-googlepubsub-asyncapi
+  - <<: *build
     id: protoc-gen-nats-asyncapi
     main: ./cmd/protoc-gen-nats-asyncapi
     binary: protoc-gen-nats-asyncapi
@@ -50,6 +54,10 @@ archives:
     id: protoc-gen-amqp-asyncapi
     ids: [protoc-gen-amqp-asyncapi]
     name_template: "protoc-gen-amqp-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - <<: *archive
+    id: protoc-gen-googlepubsub-asyncapi
+    ids: [protoc-gen-googlepubsub-asyncapi]
+    name_template: "protoc-gen-googlepubsub-asyncapi_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   - <<: *archive
     id: protoc-gen-nats-asyncapi
     ids: [protoc-gen-nats-asyncapi]

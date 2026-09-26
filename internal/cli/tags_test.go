@@ -9,6 +9,7 @@ import (
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/amqp"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/core"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/googlepubsub"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
@@ -22,6 +23,7 @@ package tags.v1;
 import "asyncapi/v3/annotations.proto";
 import "amqp/asyncapi/v1/annotations.proto";
 import "google/protobuf/empty.proto";
+import "googlepubsub/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -33,6 +35,7 @@ option (asyncapi.v3.document) = {
     {name: "nats", host: "nats:4222", protocol: "nats"},
     {name: "redis", host: "redis:6379", protocol: "redis"},
     {name: "rabbitmq", host: "rabbitmq:5672", protocol: "amqp"},
+    {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"},
     {name: "temporal", host: "temporal:7233", protocol: "temporal"}
   ]
 };
@@ -70,6 +73,13 @@ service Billing {
   option (asyncapi.v3.service) = {tags: [{name: "payments"}]};
   // Charges.
   rpc Charge(M) returns (M) { option (amqp.asyncapi.v1.operation) = {}; }
+}
+
+// Clicks on Google Pub/Sub.
+service Clicks {
+  option (asyncapi.v3.service) = {tags: [{name: "analytics"}]};
+  // Tracks.
+  rpc Track(google.protobuf.Empty) returns (stream M) { option (googlepubsub.asyncapi.v1.operation) = {}; }
 }
 
 message M { string id = 1; }
@@ -120,7 +130,7 @@ func (d tagDoc) infoTags() string {
 }
 
 func TestWithoutDefaultTags(t *testing.T) {
-	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing"
+	const withDefaults = "platform,Workflows,workflow:Run,Flows,Signals,Api,Cache,Billing,Clicks"
 	for _, tc := range []struct {
 		param string
 		ops   map[string]string
@@ -138,6 +148,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Cache.Invalidate":   "Cache",
 				"Cache.expiry":       "Cache",
 				"Billing.Charge":     "Billing,payments",
+				"Clicks.Track":       "Clicks,analytics",
 			},
 			info: withDefaults,
 		},
@@ -153,6 +164,7 @@ func TestWithoutDefaultTags(t *testing.T) {
 				"Cache.Invalidate":   "Cache",
 				"Cache.expiry":       "",
 				"Billing.Charge":     "payments",
+				"Clicks.Track":       "analytics",
 			},
 			info: "platform,Workflows,workflow:Run,Signals",
 		},
@@ -206,6 +218,7 @@ func TestWithoutDefaultTagsEveryPlugin(t *testing.T) {
 	}{
 		{All, "Api.Get", "reads"},
 		{amqp.Plugin, "Billing.Charge", "payments"},
+		{googlepubsub.Plugin, "Clicks.Track", "analytics"},
 		{nats.Plugin, "Api.Get", "reads"},
 		{redis.Plugin, "Cache.Invalidate", "Cache"},
 		{temporal.Plugin, "workflow.Run", "Workflows"},

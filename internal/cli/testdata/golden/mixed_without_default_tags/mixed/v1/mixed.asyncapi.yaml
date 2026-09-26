@@ -6,8 +6,8 @@ info:
   version: 1.0.0
   description: |-
     Order processing that runs on Temporal, publishes events on NATS, queues
-    receipts on Redis and invoices on RabbitMQ: four protocols in one AsyncAPI
-    document.
+    receipts on Redis and invoices on RabbitMQ, and exports analytics to Google
+    Pub/Sub: five protocols in one AsyncAPI document.
   tags:
     - name: Workflows
       description: Workflow types. Starting one returns immediately; its result is delivered on the reply channel when the execution completes.
@@ -27,6 +27,9 @@ servers:
   rabbitmq:
     host: rabbitmq.example:5672
     protocol: amqp
+  pubsub:
+    host: pubsub.googleapis.com:443
+    protocol: googlepubsub
 defaultContentType: application/json
 channels:
   workflow.ProcessOrder:
@@ -112,6 +115,16 @@ channels:
         queue:
           name: orders.invoices
         bindingVersion: 0.3.0
+  orders.completed:
+    address: orders.completed
+    messages:
+      mixed.v1.OrderResult:
+        $ref: '#/components/messages/mixed.v1.OrderResult'
+    servers:
+      - $ref: '#/servers/pubsub'
+    bindings:
+      x-googlepubsub:
+        topic: orders.completed
 operations:
   workflow.ProcessOrder:
     action: receive
@@ -167,6 +180,14 @@ operations:
     messages:
       - $ref: '#/channels/queue.orders.invoices/messages/mixed.v1.OrderResult'
     x-protobuf-method: mixed.v1.Invoicing.Issue
+  Analytics.Export:
+    action: send
+    channel:
+      $ref: '#/channels/orders.completed'
+    summary: Exports completed orders.
+    messages:
+      - $ref: '#/channels/orders.completed/messages/mixed.v1.OrderResult'
+    x-protobuf-method: mixed.v1.Analytics.Export
 components:
   schemas:
     mixed.v1.Order:

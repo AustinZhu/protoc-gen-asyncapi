@@ -12,6 +12,7 @@ import (
 
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/amqp"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/golden"
+	"github.com/AustinZhu/protoc-gen-asyncapi/internal/googlepubsub"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/nats"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/redis"
 	"github.com/AustinZhu/protoc-gen-asyncapi/internal/temporal"
@@ -23,10 +24,12 @@ var importPaths = []string{
 	"testdata/protos",
 	"../../proto/amqp",
 	"../../proto/asyncapi",
+	"../../proto/googlepubsub",
 	"../../proto/nats",
 	"../../proto/redis",
 	"../../proto/temporal",
 	"../../examples/amqp/proto",
+	"../../examples/googlepubsub/proto",
 	"../../examples/nats/proto",
 	"../../examples/redis/proto",
 	"../../examples/temporal/proto",
@@ -42,7 +45,7 @@ func TestGolden(t *testing.T) {
 	}{
 		{"mixed", "", []string{"mixed/v1/mixed.proto"}},
 		{"mixed_without_default_tags", "without_default_tags=true", []string{"mixed/v1/mixed.proto"}},
-		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shipping/v1/shipping.proto", "acme/shop/v1/orders.proto"}},
+		{"examples", "", []string{"acme/orders/v1/orders.proto", "acme/notify/v1/notify.proto", "acme/shipping/v1/shipping.proto", "acme/analytics/v1/analytics.proto", "acme/shop/v1/orders.proto"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,6 +71,8 @@ func TestSingleProtocolPluginsIgnoreOthers(t *testing.T) {
 		{"redis", golden.Run(redis.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Receipts.Send", "Events.Completed"},
 		{"amqp", golden.Run(amqp.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Invoicing.Issue", "Receipts.Send"},
 		{"nats without amqp", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "Invoicing"},
+		{"googlepubsub", golden.Run(googlepubsub.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Analytics.Export", "Invoicing.Issue"},
+		{"nats without googlepubsub", golden.Run(nats.Plugin, proto.Clone(req).(*pluginpb.CodeGeneratorRequest)), "Events.Completed", "Analytics"},
 	} {
 		if tc.resp.Error != nil {
 			t.Fatalf("%s: %s", tc.name, tc.resp.GetError())

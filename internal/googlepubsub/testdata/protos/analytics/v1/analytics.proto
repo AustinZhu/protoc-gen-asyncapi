@@ -1,0 +1,257 @@
+// Analytics on Google Cloud Pub/Sub.
+syntax = "proto3";
+
+package analytics.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "googlepubsub/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "Analytics"
+    version: "4.0.0"
+  }
+  servers: [
+    {
+      name: "production"
+      host: "europe-west1-pubsub.googleapis.com:443"
+      description: "Regional endpoint."
+    },
+    {
+      name: "emulator"
+      host: "localhost:8085"
+    }
+  ]
+};
+option (googlepubsub.asyncapi.v1.document) = {
+  project: "acme-prod"
+  servers: [
+    {name: "production"},
+    {
+      name: "emulator"
+      project: "local"
+      emulator: true
+    }
+  ]
+  topics: [
+    {
+      name: "clickstream"
+      labels: {
+        key: "team"
+        value: "growth"
+      }
+      message_retention_duration: "168h"
+      allowed_persistence_regions: [
+        "europe-west1",
+        "europe-west4"
+      ]
+      enforce_in_transit: true
+      schema: {
+        name: "click-event"
+        encoding: ENCODING_BINARY
+        first_revision_id: "a1b2c3"
+      }
+      kms_key_name: "projects/acme-prod/locations/europe-west1/keyRings/pubsub/cryptoKeys/clickstream"
+      description: "Every click on the web shop."
+    },
+    {
+      name: "clickstream.dead"
+      description: "Clicks the sessionizer could not process."
+    },
+    {
+      name: "orders.events"
+      labels: {
+        key: "team"
+        value: "orders"
+      }
+      message_retention_duration: "72h"
+    }
+  ]
+  subscriptions: [
+    {
+      name: "clickstream-sessionizer"
+      topic: "clickstream"
+      ack_deadline: "60s"
+      enable_message_ordering: true
+      enable_exactly_once_delivery: true
+      filter: "attributes.region = \"eu\""
+      expiration: "never"
+      dead_letter_policy: {
+        topic: "clickstream.dead"
+        max_delivery_attempts: 10
+      }
+      retry_policy: {
+        minimum_backoff: "5s"
+        maximum_backoff: "300s"
+      }
+      labels: {
+        key: "team"
+        value: "growth"
+      }
+    },
+    {
+      name: "clickstream-bq"
+      topic: "clickstream"
+      bigquery: {
+        table: "acme-prod.analytics.clicks"
+        use_topic_schema: true
+        write_metadata: true
+        drop_unknown_fields: true
+      }
+    },
+    {
+      name: "clickstream-archive"
+      topic: "clickstream"
+      cloud_storage: {
+        bucket: "acme-clickstream-archive"
+        filename_prefix: "clicks/"
+        filename_suffix: ".avro"
+        filename_datetime_format: "YYYY-MM-DD/hh_mm_ssZ"
+        max_duration: "5m"
+        max_bytes: 1073741824
+        avro: {write_metadata: true}
+      }
+    },
+    {
+      name: "orders-webhook"
+      topic: "orders.events"
+      push: {
+        endpoint: "https://hooks.acme.example/orders"
+        service_account_email: "pubsub-push@acme-prod.iam.gserviceaccount.com"
+        no_wrapper: true
+        write_metadata: true
+      }
+      ack_deadline: "30s"
+    },
+    {
+      name: "orders-fulfilment"
+      topic: "orders.events"
+      retain_acked_messages: true
+      message_retention_duration: "72h"
+      expiration: "720h"
+    }
+  ]
+};
+
+// Web shop clicks.
+service Clickstream {
+  // Tracks clicks.
+  rpc Track(google.protobuf.Empty) returns (stream ClickEvent) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "clickstream"
+      publish: {
+        ordering_key: "{session_id}"
+        attributes: {
+          key: "region"
+          value: "eu"
+        }
+        attributes: {
+          key: "source"
+          value: "web"
+        }
+        batch_max_messages: 100
+        batch_max_bytes: 1048576
+        batch_max_latency: "10ms"
+        compression: true
+      }
+    };
+  }
+
+  // Groups clicks into sessions.
+  rpc Sessionize(ClickEvent) returns (google.protobuf.Empty) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "clickstream"
+      subscription: "clickstream-sessionizer"
+      consume: {
+        max_outstanding_messages: 1000
+        max_outstanding_bytes: 104857600
+        max_extension: "60m"
+      }
+    };
+  }
+}
+
+// Order events.
+service Orders {
+  option (googlepubsub.asyncapi.v1.service) = {topic_prefix: "orders"};
+
+  // Publishes order events.
+  rpc Events(google.protobuf.Empty) returns (stream OrderEvent) {
+    option (googlepubsub.asyncapi.v1.operation) = {topic: "events"};
+  }
+
+  // Receives order events pushed to the webhook.
+  rpc Webhook(OrderEvent) returns (google.protobuf.Empty) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "events"
+      subscription: "orders-webhook"
+    };
+  }
+
+  // Fulfils orders.
+  rpc Fulfil(OrderEvent) returns (google.protobuf.Empty) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "events"
+      subscription: "orders-fulfilment"
+      consume: {synchronous_pull: true}
+    };
+  }
+}
+
+// Report generation over request/reply topics.
+service Reports {
+  option (googlepubsub.asyncapi.v1.service) = {subscription: "reports-worker"};
+
+  // Generates a report.
+  rpc Generate(ReportRequest) returns (ReportResult) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "reports.requests"
+      reply_topic: "reports.replies"
+      reply_messages: ["analytics.v1.ReportError"]
+    };
+  }
+}
+
+// A click.
+message ClickEvent {
+  // Browser session.
+  string session_id = 1;
+  string url = 2;
+  string region = 3;
+}
+
+// An order event.
+message OrderEvent {
+  string order_id = 1;
+  string status = 2;
+}
+
+message ReportRequest {
+  string report = 1;
+}
+
+message ReportResult {
+  string url = 1;
+}
+
+// Error reply.
+message ReportError {
+  string message = 1;
+}
+
+// An audit record, documented without an rpc.
+message AuditRecord {
+  option (googlepubsub.asyncapi.v1.message) = {
+    topic: "audit.records"
+    ordering_key: "tenant"
+    attributes: {
+      key: "kind"
+      value: "audit"
+    }
+    schema: "projects/acme-audit/schemas/audit-record"
+  };
+
+  string tenant = 1;
+  string action = 2;
+}

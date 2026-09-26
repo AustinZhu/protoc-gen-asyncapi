@@ -1,0 +1,137 @@
+// Storefront analytics for the ACME shop, on Google Cloud Pub/Sub.
+//
+// The storefront publishes page views, ordered per visitor; a BigQuery
+// subscription archives them, and the recommender consumes them from a pull
+// subscription that dead-letters poison messages.
+syntax = "proto3";
+
+package acme.analytics.v1;
+
+import "asyncapi/v3/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "googlepubsub/asyncapi/v1/annotations.proto";
+
+option (asyncapi.v3.document) = {
+  info: {
+    title: "ACME Storefront Analytics"
+    version: "1.3.0"
+    contact: {
+      name: "Data team"
+      email: "data@acme.example"
+    }
+  }
+  id: "urn:acme:analytics"
+  servers: [
+    {
+      name: "production"
+      host: "pubsub.googleapis.com:443"
+      description: "Google Cloud Pub/Sub."
+      security: ["google"]
+    },
+    {
+      name: "emulator"
+      host: "localhost:8085"
+      description: "`gcloud beta emulators pubsub start`."
+    }
+  ]
+  security_schemes: [
+    {
+      name: "google"
+      type: SECURITY_SCHEME_TYPE_OAUTH2
+      description: "Google service account credentials."
+      flows: {
+        client_credentials: {
+          token_url: "https://oauth2.googleapis.com/token"
+          available_scopes: {
+            key: "https://www.googleapis.com/auth/pubsub"
+            value: "Publish and consume."
+          }
+        }
+      }
+    }
+  ]
+};
+option (googlepubsub.asyncapi.v1.document) = {
+  project: "acme-shop"
+  servers: [
+    {name: "production"},
+    {
+      name: "emulator"
+      emulator: true
+    }
+  ]
+  topics: [
+    {
+      name: "page-views"
+      message_retention_duration: "168h"
+      schema: {
+        name: "page-view"
+        encoding: ENCODING_JSON
+      }
+      description: "Every storefront page view."
+    },
+    {name: "page-views.dead"}
+  ]
+  subscriptions: [
+    {
+      name: "page-views-recommender"
+      topic: "page-views"
+      ack_deadline: "30s"
+      enable_message_ordering: true
+      dead_letter_policy: {
+        topic: "page-views.dead"
+        max_delivery_attempts: 5
+      }
+      retry_policy: {minimum_backoff: "10s"}
+    },
+    {
+      name: "page-views-warehouse"
+      topic: "page-views"
+      bigquery: {
+        table: "acme-shop.analytics.page_views"
+        use_topic_schema: true
+        write_metadata: true
+      }
+    }
+  ]
+};
+
+// Storefront tracking.
+service Storefront {
+  // Published for every page view, ordered per visitor.
+  rpc PageViewed(google.protobuf.Empty) returns (stream PageView) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "page-views"
+      publish: {
+        ordering_key: "{visitor_id}"
+        attributes: {
+          key: "source"
+          value: "storefront"
+        }
+      }
+    };
+  }
+}
+
+// Product recommendations.
+service Recommender {
+  // Updates the visitor's recommendations.
+  rpc Learn(PageView) returns (google.protobuf.Empty) {
+    option (googlepubsub.asyncapi.v1.operation) = {
+      topic: "page-views"
+      subscription: "page-views-recommender"
+      consume: {max_outstanding_messages: 500}
+    };
+  }
+}
+
+// A page view.
+message PageView {
+  // Anonymous visitor ID.
+  string visitor_id = 1;
+  string path = 2;
+  // Product shown on the page, if any.
+  string product_id = 3;
+  google.protobuf.Timestamp viewed_at = 4;
+}

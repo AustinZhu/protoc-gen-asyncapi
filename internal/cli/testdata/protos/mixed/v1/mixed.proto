@@ -1,6 +1,6 @@
 // Order processing that runs on Temporal, publishes events on NATS, queues
-// receipts on Redis and invoices on RabbitMQ: four protocols in one AsyncAPI
-// document.
+// receipts on Redis and invoices on RabbitMQ, and exports analytics to Google
+// Pub/Sub: five protocols in one AsyncAPI document.
 syntax = "proto3";
 
 package mixed.v1;
@@ -8,6 +8,7 @@ package mixed.v1;
 import "amqp/asyncapi/v1/annotations.proto";
 import "asyncapi/v3/annotations.proto";
 import "google/protobuf/empty.proto";
+import "googlepubsub/asyncapi/v1/annotations.proto";
 import "nats/asyncapi/v1/annotations.proto";
 import "redis/asyncapi/v1/annotations.proto";
 import "temporal/asyncapi/v1/options.proto";
@@ -18,7 +19,8 @@ option (asyncapi.v3.document) = {
     {name: "nats", host: "nats.example:4222", protocol: "nats"},
     {name: "temporal", host: "temporal.example:7233", protocol: "temporal"},
     {name: "redis", host: "redis.example:6379", protocol: "redis"},
-    {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"}
+    {name: "rabbitmq", host: "rabbitmq.example:5672", protocol: "amqp"},
+    {name: "pubsub", host: "pubsub.googleapis.com:443", protocol: "googlepubsub"}
   ]
 };
 
@@ -70,6 +72,16 @@ service Invoicing {
   // Issues the invoice of a completed order.
   rpc Issue(OrderResult) returns (google.protobuf.Empty) {
     option (amqp.asyncapi.v1.operation) = {queue: "orders.invoices"};
+  }
+}
+
+// Analytics, exported to Google Pub/Sub.
+service Analytics {
+  option (asyncapi.v3.service) = {servers: ["pubsub"]};
+
+  // Exports completed orders.
+  rpc Export(google.protobuf.Empty) returns (stream OrderResult) {
+    option (googlepubsub.asyncapi.v1.operation) = {topic: "orders.completed"};
   }
 }
 

@@ -11,15 +11,17 @@ The repository is one shared core plus one package per protocol:
 | --- | --- | --- |
 | **Core** | `asyncapi/v3/annotations.proto` (`buf.build/austin-zhu/asyncapi`) | The whole AsyncAPI 3.0/3.1 object model: info, servers, security schemes and OAuth flows, channels, parameters, operations, replies, messages, headers, examples, tags, external docs, bindings and `x-` extensions. JSON Schemas for every payload, from the proto definitions, comments, [protovalidate](https://github.com/bufbuild/protovalidate) rules and `google.api.field_behavior`. |
 | **AMQP** | `amqp/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/amqp-asyncapi`) | AMQP 0-9-1 and RabbitMQ, using the official AsyncAPI AMQP bindings. Covers exchanges (direct, fanout, topic, headers, alternate, delayed, exchange-to-exchange bindings), queues (classic, quorum and stream, with TTLs, length limits, dead-lettering and priorities) and their bindings, publishing (delivery mode, priority, expiration, CC/BCC, confirms), consuming (acks, prefetch, exclusive and stream consumers), RPC over `reply_to` and direct reply-to, and server details (vhost, TLS, heartbeat, SASL mechanism). |
+| **Google Pub/Sub** | `googlepubsub/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/googlepubsub-asyncapi`) | Google Cloud Pub/Sub, using the official AsyncAPI Google Pub/Sub bindings. Covers topics (schemas, retention, storage regions, KMS keys, labels) and subscriptions (pull, push with OIDC or unwrapped delivery, BigQuery and Cloud Storage exports; ordering, exactly-once delivery, filters, dead-lettering, retry, expiration). Publishing covers ordering keys, attributes, batching and compression; subscribing covers flow control and ack deadline extension. Also request/reply over topics, projects and the emulator. |
 | **NATS** | `nats/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/nats-asyncapi`) | Core NATS publish/subscribe, request/reply, queue groups, [NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services, JetStream streams and consumers, KV buckets and object stores. |
 | **Redis** | `redis/asyncapi/v1/annotations.proto` (`buf.build/austin-zhu/redis-asyncapi`) | Pub/Sub (plain, pattern and sharded), Streams with consumer groups, trimming, claiming and dead letters, Lists as FIFO, LIFO and reliable queues, keyspace and keyevent notifications, request/reply, and server details (topology, database, TLS, RESP, authentication). |
 | **Temporal** | `temporal/asyncapi/v1/options.proto` (`buf.build/austin-zhu/temporal-asyncapi`) | [Temporal](https://temporal.io) Workflows, Activities, Signals, Queries and Updates, with task queues, timeouts, retry policies and continue-as-new. |
 
-Five binaries are built from it:
+Six binaries are built from it:
 
-- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, NATS, Redis and Temporal services.
-- **`protoc-gen-amqp-asyncapi`**, **`protoc-gen-nats-asyncapi`**, **`protoc-gen-redis-asyncapi`** and
-  **`protoc-gen-temporal-asyncapi`** document
+- **`protoc-gen-asyncapi`** documents every protocol. One document may mix AMQP, Google Pub/Sub, NATS, Redis and
+  Temporal services.
+- **`protoc-gen-amqp-asyncapi`**, **`protoc-gen-googlepubsub-asyncapi`**, **`protoc-gen-nats-asyncapi`**,
+  **`protoc-gen-redis-asyncapi`** and **`protoc-gen-temporal-asyncapi`** document
   only their own protocol and ignore services annotated for another.
 
 The plugin generates documentation only. It generates no code and never contacts a server.
@@ -35,6 +37,7 @@ go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-temporal-asyn
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-nats-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-redis-asyncapi@latest
 go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-amqp-asyncapi@latest
+go install github.com/AustinZhu/protoc-gen-asyncapi/cmd/protoc-gen-googlepubsub-asyncapi@latest
 ```
 
 Prebuilt binaries are attached to each [GitHub release](https://github.com/AustinZhu/protoc-gen-asyncapi/releases),
@@ -53,6 +56,7 @@ deps:
   - buf.build/austin-zhu/nats-asyncapi       # nats.asyncapi.v1
   - buf.build/austin-zhu/redis-asyncapi      # redis.asyncapi.v1
   - buf.build/austin-zhu/amqp-asyncapi       # amqp.asyncapi.v1
+  - buf.build/austin-zhu/googlepubsub-asyncapi  # googlepubsub.asyncapi.v1
   # pin a release with :v0.3.0
 ```
 
@@ -149,8 +153,28 @@ service Shipments {
 }
 ```
 
+A Google Pub/Sub service:
+
+```proto
+import "google/protobuf/empty.proto";
+import "googlepubsub/asyncapi/v1/annotations.proto";
+
+option (googlepubsub.asyncapi.v1.document) = {
+  project: "acme-shop"
+  subscriptions: [{name: "page-views-recommender", topic: "page-views", enable_message_ordering: true}]
+};
+
+service Recommender {
+  // Updates the visitor's recommendations.
+  rpc Learn(PageView) returns (google.protobuf.Empty) {
+    option (googlepubsub.asyncapi.v1.operation) = {topic: "page-views", subscription: "page-views-recommender"};
+  }
+}
+```
+
 [`examples/`](examples) has a complete setup for every protocol and the documents it generates:
 [AMQP](examples/asyncapi/acme/shipping/v1/shipping.asyncapi.yaml),
+[Google Pub/Sub](examples/asyncapi/acme/analytics/v1/analytics.asyncapi.yaml),
 [NATS](examples/asyncapi/acme/orders/v1/orders.asyncapi.yaml),
 [Redis](examples/asyncapi/acme/notify/v1/notify.asyncapi.yaml) and
 [Temporal](examples/asyncapi/acme/shop/v1/orders.asyncapi.yaml).
@@ -357,6 +381,57 @@ Generation fails with `file:line:column` on topology RabbitMQ would reject or th
 - a stream consumer without prefetch;
 - references to undeclared exchanges.
 
+## Google Pub/Sub
+
+The official AsyncAPI Google Pub/Sub bindings (0.2.0) are used where they apply:
+- The **channel binding** gives a topic's labels, retention, storage regions and schema settings. It requires a
+  schema, so it's only emitted for topics that have one.
+- The **message binding** gives a message's attributes, ordering key and schema.
+
+Everything else goes in `x-googlepubsub` bindings on servers, channels and operations, whose official bindings AsyncAPI
+reserves. That includes the topic's full name, KMS key and subscriptions, rendered with the Pub/Sub API's field
+names, and the topic properties of topics without a schema.
+
+**Channels.** Each topic is a channel. Publishers `send` to it, and subscribers `receive` from it through a
+subscription, named in the operation binding. With `perspective=server` the documented service's side is used;
+`perspective=client` flips it.
+
+| `(googlepubsub.asyncapi.v1.operation)` | Meaning |
+| --- | --- |
+| `topic` | Topic ID after the service's `topic_prefix`; defaults to `<package>.<service>.<rpc>` in snake_case. `{name}` placeholders are channel parameters. |
+| `subscription` | Subscription the consumer reads from; defaults to the service's for the service's own consumers. Undeclared subscriptions are documented as pull subscriptions. |
+| `publish` | `ordering_key` (a template such as `"{customer_id}"`), `attributes` set on every message (documented as constant headers), client `batch_*` settings and `compression`. |
+| `consume` | Flow control (`max_outstanding_messages`, `max_outstanding_bytes`), `max_extension` of ack deadlines and `synchronous_pull`. |
+| `reply_topic` | Required for request/reply rpcs: Pub/Sub has no replies, so replies are published to this topic, correlated by a `correlation_id` attribute. |
+
+- **Topology.** `(googlepubsub.asyncapi.v1.document)` declares:
+  - **The project**, which qualifies topic, subscription and schema names.
+  - **Topics:** labels, retention, allowed persistence regions (optionally enforced in transit), schema with encoding
+    and revision range, and KMS key.
+  - **Subscriptions:**
+    - Settings: ack deadline, retention of acked messages, retention, labels, ordering, expiration, filter,
+      dead-letter policy, retry policy and exactly-once delivery.
+    - Delivery: pull, push (endpoint, OIDC token, unwrapped delivery with metadata headers, attributes), BigQuery
+      (table, topic or table schema, metadata, unknown fields) or Cloud Storage (file naming, batching limits, text
+      or Avro).
+
+  Declared topics and their subscriptions are documented even without an rpc.
+- **Messages.** A message annotation sets attributes, an ordering key and a schema, and a `topic` gives the message
+  its own channel. Messages on a topic with a schema reference that schema. Document other attributes as message
+  headers with `(asyncapi.v3.message).headers`.
+- **Servers.** `(googlepubsub.asyncapi.v1.document).servers` sets a server's project and marks the emulator. Declare
+  credentials as an OAuth 2 security scheme, as the example does.
+
+Generation fails with `file:line:column` on settings Pub/Sub would reject, for example:
+- invalid topic or subscription IDs;
+- durations outside Pub/Sub's ranges;
+- exactly-once delivery on push subscriptions;
+- a dead-letter topic equal to the subscription's topic;
+- non-HTTPS push endpoints;
+- consumers of export subscriptions;
+- a subscription used with another topic;
+- request/reply without a reply topic.
+
 ## How Protobuf maps onto JSON Schema
 
 Schemas describe the canonical **Protobuf JSON** encoding.
@@ -426,7 +501,7 @@ Both overrides must be valid JSON Schema (draft-07). Generation fails with `file
 
 A protocol implements `core.Protocol` (`internal/core/builder.go`): it claims the services it understands and adds
 channels, messages and operations through `core.Builder`. The core handles everything else: documents, servers,
-security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp` and `internal/nats`, then register
+security, tags, schemas, bindings, validation and output. See `internal/temporal`, `internal/redis`, `internal/amqp`, `internal/googlepubsub` and `internal/nats`, then register
 the protocol in `internal/cli/plugins.go` and give it an annotations module under `proto/`.
 
 ## Development
@@ -449,14 +524,14 @@ Push a `v*` tag, or run the **release** workflow manually with a version. The wo
 failure:
 
 1. Tests and spec validation, as in CI.
-2. For each of `proto/amqp`, `proto/asyncapi`, `proto/nats`, `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
+2. For each of `proto/amqp`, `proto/asyncapi`, `proto/googlepubsub`, `proto/nats`, `proto/redis` and `proto/temporal`: `buf lint`, `buf breaking` against the previous
    release tag (breaking changes are allowed on a major bump, or a minor bump while on v0), and a check that
    `buf.yaml` names the module. It also checks that the `BUF_TOKEN` secret is set.
-3. GoReleaser publishes the GitHub release and the five binaries.
-4. The five annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
+3. GoReleaser publishes the GitHub release and the six binaries.
+4. The six annotation modules are pushed to the BSR, labeled with the tag. The newest stable release also gets
    the `main` label, the BSR's default, so unpinned dependencies resolve to it. The example modules are never published,
    and nothing is published from pull requests, forks or branch pushes.
 
 Before a release, the owner must create each module on the BSR (the workflow doesn't pass `--create`) and give the
-`BUF_TOKEN` bot user write access to those five modules only. The token is passed to `buf push` through the
+`BUF_TOKEN` bot user write access to those six modules only. The token is passed to `buf push` through the
 environment and is never logged or written to disk.
